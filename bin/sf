@@ -2,8 +2,14 @@
 """sf — Story Forge DSL CLI.
 
 Subcommands:
-  sf parse  FILE.sf [--out PATH]   parse + resolve + emit storyplan; print AST + plan
-  sf render FILE.sf [--dry]        full pipeline: parse → storyplan → render mp4
+  sf parse  FILE.sf [--out PATH]                            parse + emit storyplan
+  sf render FILE.sf [--dry] [--out FILE.mp4]
+                    [--scenes a,b,c] [--engine lean|full]   compile + render
+
+Defaults:
+  --engine lean  → per-scene Flux+render-route+ffmpeg (fast, MVP-grade)
+  --engine full  → delegate to story_pipeline.py (overlays, chapter grades)
+  --out (omit)   → ~/AI/videopipe/outputs/<slug>.mp4
 """
 
 from __future__ import annotations
@@ -60,11 +66,23 @@ def cmd_render(args: argparse.Namespace) -> int:
     plan_path = path.with_suffix(".storyplan.json")
     write_storyplan(plan, plan_path)
     print(f"wrote {plan_path}", file=sys.stderr)
+
     if args.dry:
         cfg = runner.storyplan_to_pipeline_config(plan)
         print(json.dumps(cfg, indent=2, default=str))
         return 0
-    result = runner.render(plan_path, dry_run=False)
+
+    # Default output path: ~/AI/videopipe/outputs/<slug>.mp4
+    slug = plan["film_meta"].get("slug", path.stem)
+    default_out = Path.home() / "AI" / "videopipe" / "outputs" / f"{slug}.mp4"
+    out_path = Path(args.out) if args.out else default_out
+
+    scene_filter = ([s.strip() for s in args.scenes.split(",") if s.strip()]
+                    if args.scenes else None)
+
+    result = runner.render(plan_path, dry_run=False,
+                           engine=args.engine,
+                           out=out_path, scenes=scene_filter)
     print(json.dumps(result, indent=2, default=str))
     return 0
 
@@ -79,10 +97,19 @@ def main(argv: list[str] | None = None) -> int:
     p_parse.add_argument("--out", help="write storyplan JSON to this path")
     p_parse.set_defaults(func=cmd_parse)
 
-    p_render = sub.add_parser("render", help="parse + storyplan + render")
+    p_render = sub.add_parser("render", help="parse + storyplan + render mp4")
     p_render.add_argument("file")
     p_render.add_argument("--dry", action="store_true",
                           help="print pipeline config but don't run renderer")
+    p_render.add_argument("--out", default=None,
+                          help="output mp4 path "
+                               "(default: ~/AI/videopipe/outputs/<slug>.mp4)")
+    p_render.add_argument("--scenes", default=None,
+                          help="comma-separated scene names to render "
+                               "(default: all)")
+    p_render.add_argument("--engine", choices=["lean", "full"], default="lean",
+                          help="lean=per-scene render-route+ffmpeg (fast); "
+                               "full=story_pipeline.py with overlays")
     p_render.set_defaults(func=cmd_render)
 
     args = ap.parse_args(argv)

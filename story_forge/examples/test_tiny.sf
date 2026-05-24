@@ -1,0 +1,13 @@
+# test_tiny.sf — smallest end-to-end Story Forge film.
+# Single LTX scene, 3 seconds, no narration. Target wall time ~2 min on M5.
+# Use to validate the full DSL -> mp4 path after touching parser/resolver/run.
+
+film "Test Tiny" slug=test_tiny target=m5 scene_dur=3.0
+
+scene drifting_clouds:
+    still flux:
+        prompt: "wide cinematic shot of distant mountain ridges at sunset, soft golden light, painterly atmosphere, 4k"
+        seed: 42
+    motion ltx:
+        prompt: "slow ambient drift, light clouds move gently across the sky, gentle wind, no camera movement"
+        duration: 3.0
