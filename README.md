@@ -5,7 +5,7 @@
 ```
    ╔══════════════════════════════════════════════════╗
    ║                                                  ║
-   ║    flux  →  wan  →  piper  →  ace-step  →  mux   ║
+   ║    flux  →  wan/ltx  →  piper  →  ace-step  →  mux   ║
    ║                                                  ║
    ║          a script.  a laptop.  a film.           ║
    ║                                                  ║
@@ -13,6 +13,8 @@
 ```
 
 Story Forge is a self-contained pipeline that takes a structured story description and produces a finished animated film — with motion, narration, original music, title and credits — entirely on local hardware. Five open-source models composed by `ffmpeg`. **Zero cloud calls. Zero API charges. Zero rate limits.** Run it once, run it a thousand times.
+
+> First public-confirmed LTX 13B distilled 0.9.8 working on Apple Silicon MPS — see [`metal/`](metal/) for the hand-written Metal flash-attention kernel that delivered a 12.32× speedup vs PyTorch SDPA.
 
 ### ▶ Watch the first Story Forge film — *The Bear Sister*
 
@@ -22,29 +24,198 @@ Story Forge is a self-contained pipeline that takes a structured story descripti
 
 ---
 
-## 🚀 Status — 2026-05-24 build session
+## 🚀 Status — 2026-05-24 SHIP STATE
 
-The speedup build is underway. **First public-first wins last night:**
+The v1 ship state is live. The DSL compiles, the routes work, the kernel is in:
 
-- ✅ **LTX 13B distilled 0.9.8 working on Apple Silicon MPS** — likely the first public-confirmed working setup (cross-checked by 5 research agents). 118s per 5-sec clip, **5.6× faster than Wan baseline**. Path: Lightricks' own upstream code (not `diffusers` — single-pass `LTXImageToVideoPipeline` physically cannot reproduce the 0.9.8 multi-scale 7+3 recipe). Wrapper at `bin/make-ltx-lightricks`.
-- ✅ **LPIPS-gated speedup measurement harness** — novel on Mac. Every multiplier (quant, cache, distill, kernel) must pass per-frame LPIPS<0.05 AND speedup>1.10× before integration. At `bin/measure-render`.
-- ✅ **Two-node mesh** — M5 Max (primary) + Mac mini M4 Pro (background). Mini runs Wan Q4_K_M GGUF (~9.6GB each stage) via `city96/ComfyUI-GGUF` + `kijai/ComfyUI-WanVideoWrapper` EasyCache, hits ~40 min/clip (M4 Pro is ~4× slower than M5 for Wan 14B). Mini is positioned as overnight/batch tier, not realtime peer.
-- ✅ **Custom Metal flash-attention kernel — 12.32× speedup vs PyTorch MPS SDPA** with PSNR 137 dB (numerically identical). Hand-written tiled fp16 kernel with online softmax via `torch.mps.compile_shader`. On a (1, 40, 4096, 128) attention call: 4.9ms fused vs 60.4ms PyTorch reference. PyTorch's MPS SDPA falls back to a non-fused path; our kernel is the first Wan-shaped flash-attn for Apple Silicon. At `metal/flash_attn_mps.py` (~144 lines of MSL).
-- ✅ **`render-route` upgraded** — auto-selects Wan (hero) vs LTX (B-roll) per scene heuristic. Now points at the working `make-ltx-lightricks`.
-- 🔄 **In flight tonight:** EasyCache speedup quantification, Story Forge `.sf` DSL MVP parser, Metal flash-attention kernel.
+- ✅ **LTX 13B distilled 0.9.8 on MPS** — 118s per 5-sec clip via `bin/make-ltx-lightricks` (Lightricks' upstream multi-scale 7+3 path; `diffusers` single-pass cannot reproduce this recipe). Likely the first public-confirmed working setup on Apple Silicon.
+- ✅ **Custom Metal flash-attention kernel** — 12.32× standalone vs PyTorch MPS SDPA, 2× end-to-end on Wan renders. Hand-written tiled fp16 with online softmax via `torch.mps.compile_shader`, PSNR 137 dB. ~144 lines of MSL at [`metal/flash_attn_mps.py`](metal/flash_attn_mps.py).
+- ✅ **DSL end-to-end: first `.sf` → `.mp4`** — sunset drift / `test_tiny.sf` round-tripped through parser → resolver → emitter → run.py → render-route → ffmpeg.
+- ✅ **DSL multi-voice + SFX + lipsync flag** — 16/16 tests pass in [`story_forge/tests/test_parser.py`](story_forge/tests/test_parser.py).
+- ✅ **UI v2 live** — DSL editor + engine toggles at `http://127.0.0.1:17600/story`.
+- ✅ **LPIPS-gated measurement harness** — `bin/measure-render`, novel for Mac video diffusion. Every multiplier (quant, cache, distill, kernel) must pass per-frame LPIPS<0.05 AND speedup>1.10× before integration.
+- ⏳ **Wan 2-step distillation** — scaffold ready, 12-hr overnight training pending.
+- ⏳ **Comprehensive harness comparison** — pending after distill lands.
 
-Live build dashboard: see `build_status/index.html`.
+Live build dashboard: `http://127.0.0.1:17602` (served from [`build_status/`](build_status/)).
+
+---
+
+## Quickstart
+
+Four lines from clone to first film:
+
+```bash
+git clone https://github.com/nicedreamzapp/story-forge
+cd story-forge
+./bin/sf parse story_forge/examples/test_tiny.sf   # parser sanity (instant)
+./bin/sf render story_forge/examples/test_tiny.sf  # ~2 min on M5 Max
+# output: ~/AI/videopipe/outputs/test_tiny.mp4
+```
+
+That's it. `test_tiny.sf` is a single LTX scene, 3 seconds, no narration — the smallest end-to-end loop the pipeline runs. Once it produces an mp4, the heavier examples (`cabin_open.sf`, multi-scene films) work the same way.
+
+---
+
+## Architecture
+
+```
+.sf script ──► parser ──► resolver ──► emitter ──► .storyplan.json IR
+                                                          │
+                                                          ▼
+                                                    run.py bridge
+                                                          │
+                                                          ▼
+                                          render-route (per-scene engine pick)
+                                              │                       │
+                                              ▼                       ▼
+                                  make-ltx-lightricks         make-video --i2v
+                                  (LTX 13B distilled)         (Wan 2.2 14B + Metal flash-attn)
+                                              │                       │
+                                              └───────────┬───────────┘
+                                                          ▼
+                                          Piper (narration) + ACE-Step (music + sfx)
+                                                          │
+                                                          ▼
+                                                 ffmpeg stitch + mix
+                                                          │
+                                                          ▼
+                                                      finished.mp4
+```
+
+- **`render-route`** auto-selects Wan (hero shots with character action / faces / dialogue) or LTX (B-roll / atmosphere / wide shots) per scene based on the motion prompt, or honors an explicit `motion wan:` / `motion ltx:` block in the DSL.
+- **The Metal flash-attention kernel** sits inside the Wan path and is the reason the M5 hero shots come in inside human attention spans.
+- **Piper + ACE-Step** run in parallel with the video renders, then `ffmpeg` does sidechain-ducked mixing and xfade stitching at the end.
+
+---
+
+## The DSL grammar
+
+Story Forge films are written as `.sf` scripts — indentation-aware, comment-friendly, stdlib-only parser. The full grammar as of 2026-05-24:
+
+```
+# Comments start with '#' and go to end of line.
+
+# --- Variables (substituted in any "{$name}" inside a string) ----
+$style = "Studio Ghibli watercolor, soft snowfall, golden hour, painterly, 4k"
+$child = "a small child in a red hooded cloak, mittens"
+$cabin = "a hand-built wooden cabin with warm yellow window light"
+
+# --- Film header (one per file) ----------------------------------
+film "Cabin Open" slug=cabin_open target=m5+mini scene_dur=8.5
+
+# --- Voice presets -----------------------------------------------
+# voice <name>: <engine>/<model> <kv attrs>
+voice warm:   piper/en_US-libritts_r-medium speaker=0 length=1.18
+voice gravel: piper/en_US-libritts_r-medium speaker=14 length=1.05
+voice child:  piper/en_US-amy-medium length=1.30
+
+# --- Music presets -----------------------------------------------
+# music <name>: <engine>/<style-slug> <kv attrs>
+music wintry: ace/wintry-soft-piano vol=0.35
+
+# --- SFX presets -------------------------------------------------
+# sfx <name>: <engine>/sfx prompt="..." duration=N vol=0.NN
+sfx fire_crackle: ace/sfx prompt="fire crackling, warm hearth" duration=8 vol=0.25
+sfx wind_low:     ace/sfx prompt="low wind through pines" duration=10 vol=0.20
+
+# --- Global directives -------------------------------------------
+@transition xfade dur=0.5
+@mix duck voice -> music threshold=-22 ratio=4
+
+# --- Scenes ------------------------------------------------------
+scene snow_walk:
+    still flux:
+        prompt: "{$style}, wide shot of {$child} crossing a snowfield toward {$cabin}"
+        seed: auto                    # or an explicit int e.g. seed: 42
+    motion wan:                       # or "motion ltx:" for B-roll
+        prompt: "gentle handheld push-in, soft falling snow, child takes slow steps"
+        duration: 5.0
+    narrate warm:                     # full block form
+        line: "The snow came down like a hush."
+    sfx wind_low at=0.0               # per-scene SFX ref with offset
+    music wintry vol=0.30             # per-scene music ref (overrides preset vol)
+
+scene fireside:
+    still flux:
+        prompt: "{$style}, interior, {$child} unwrapping by a stone fireplace"
+        seed: auto
+    motion wan:
+        prompt: "intimate close shot, firelight flickers, slow zoom to flames"
+        duration: 5.0
+    narrate warm with lipsync:        # 'with lipsync' flag → drives Wav2Lip
+        line: "And the cold outside became a story she would only tell on warm nights."
+    sfx fire_crackle at=2.0
+    music wintry vol=0.40
+```
+
+Constructs at a glance:
+
+| Form | Purpose |
+|---|---|
+| `# comment` | Line comment, stripped before parse |
+| `$name = value` | Variable, interpolated via `{$name}` in any string |
+| `film "Title" slug=... target=... scene_dur=...` | Film header (one per file) |
+| `voice NAME: piper/model speaker=N length=F` | Define a reusable voice preset |
+| `music NAME: ace/style-slug vol=F` | Define a reusable music preset |
+| `sfx NAME: ace/sfx prompt="..." duration=N vol=F` | Define a reusable SFX preset |
+| `@transition xfade dur=0.5` | Global film-level directive |
+| `@mix duck voice -> music threshold=-22 ratio=4` | Global mix directive |
+| `scene NAME:` | Scene block (one per cut) |
+| `still flux:` + `prompt:` / `seed:` | Per-scene Flux still spec |
+| `motion wan:` or `motion ltx:` + `prompt:` / `duration:` | Per-scene i2v motion spec |
+| `narrate VOICE:` + `line:` | Narration in this scene |
+| `narrate VOICE with lipsync:` + `line:` | Same, but flag for Wav2Lip pass |
+| `sfx NAME at=N.N` | Per-scene SFX ref, `at=` is start offset in seconds |
+| `music NAME vol=F` | Per-scene music ref, vol overrides preset |
+
+The parser, resolver, and emitter live in [`story_forge/parser.py`](story_forge/parser.py), [`story_forge/resolver.py`](story_forge/resolver.py), and [`story_forge/emitter.py`](story_forge/emitter.py). The AST shape is documented in the parser docstring. Full reference example: [`story_forge/examples/cabin_open.sf`](story_forge/examples/cabin_open.sf).
+
+---
+
+## What's inside the repo
+
+```
+story-forge/
+├── bin/
+│   ├── sf                    # DSL CLI: sf parse / sf render
+│   ├── make-ltx-lightricks   # LTX 13B distilled 0.9.8 wrapper (the working path)
+│   ├── make-video            # Wan 2.2 14B i2v wrapper (uses Metal flash-attn)
+│   ├── render-route          # Per-scene engine picker (Wan vs LTX)
+│   └── measure-render        # LPIPS-gated speedup harness
+│
+├── story_forge/
+│   ├── parser.py             # Indentation-aware .sf → AST
+│   ├── resolver.py           # Variable interpolation + preset resolution
+│   ├── emitter.py            # AST → .storyplan.json IR
+│   ├── run.py                # IR → render-route + ffmpeg bridge
+│   ├── examples/             # cabin_open.sf, test_tiny.sf
+│   └── tests/                # test_parser.py — 16/16 green
+│
+├── metal/
+│   ├── flash_attn_mps.py     # 144-line MSL tiled flash-attn kernel
+│   ├── verify_flash_attn.py  # PSNR + speedup validator
+│   ├── metal_rmsnorm_linear.py / verify_rmsnorm_linear.py
+│   └── hello_metal.py        # Minimal compile_shader example
+│
+├── build_status/             # Live build dashboard (localhost:17602)
+├── ui/                       # Story Forge UI v2 — DSL editor + engine toggles (localhost:17600/story)
+├── server.py                 # Flask server that hosts the UI + DSL endpoints
+├── saga.mp4                  # The first film — The Bear Sister, 4:08
+├── STORYBOOK.md              # Full prose transcript of saga.mp4
+└── YOUTUBE_METADATA.md       # Tags / description for the YT upload
+```
 
 ---
 
 ## What it does
 
-You write a story as a list of scenes — each scene is one still image prompt + one motion prompt + one narration line. Story Forge takes the list and:
+You write a `.sf` script (or use the UI). Story Forge takes it and:
 
 1. Generates a Flux still per scene
-2. Animates each still with Wan i2v at native 5-sec native speed
+2. Animates each still with Wan (hero) or LTX (B-roll), routed automatically per scene
 3. Renders each narration line with Piper TTS through a warm storyteller EQ chain
-4. Generates an original instrumental score via ACE-Step
+4. Generates an original instrumental score + per-scene SFX via ACE-Step
 5. Composes the final film with `ffmpeg` — scene-synced narration via `adelay+amix`, music ducked under speech via sidechain compression, xfade transitions, Pillow PNG title and credits
 
 Every step runs locally on Apple Silicon. The output is a regular `.mp4`.
@@ -169,35 +340,15 @@ To prove the pipeline, the first thing through it is a **two-act, 4:08 animated 
 
 ---
 
-## What's under the hood
-
-```
-       ┌─────────────────────────────────────────────────────────┐
-       │                       M5 Max                             │
-       │                                                          │
-       │   ┌──────────┐    ┌──────────┐    ┌──────────┐           │
-       │   │  Flux 1  │───►│ Wan 2.2  │───►│  ffmpeg  │──► film   │
-       │   │ Dev FP8  │    │   i2v    │    │  compose │           │
-       │   └──────────┘    └──────────┘    └────▲─────┘           │
-       │   text-to-image   image-to-video       │                 │
-       │                                        │                 │
-       │   ┌──────────┐    ┌──────────┐    ┌────┴─────┐           │
-       │   │  Piper   │    │ ACE-Step │    │  Pillow  │           │
-       │   │ LibriTTS │    │  music   │    │ title +  │           │
-       │   └──────────┘    └──────────┘    │ credits  │           │
-       │   narration       instrumental    └──────────┘           │
-       │                                                          │
-       └─────────────────────────────────────────────────────────┘
-```
-
-### Component stack
+## Component stack
 
 | Stage | Tool | Model | Purpose |
 |---|---|---|---|
 | Still image per scene | [Flux 1 Dev FP8](https://huggingface.co/black-forest-labs/FLUX.1-dev) | 16 GB | Sets composition + character look |
-| Motion per scene | [Wan 2.2 i2v](https://huggingface.co/Wan-AI) | 27 GB + 1 GB lightx2v LoRA | 5-sec native motion from each still |
-| Voice narration | [Piper TTS](https://github.com/rhasspy/piper) | LibriTTS_R medium | Storyteller female voice |
-| Music | [Song Forge / ACE-Step](https://github.com/ace-step/ACE-Step) | 13 GB | Original instrumental scores |
+| Hero motion (faces / action) | [Wan 2.2 i2v](https://huggingface.co/Wan-AI) | 27 GB + 1 GB lightx2v LoRA | 5-sec native motion, Metal flash-attn accelerated |
+| B-roll motion (atmosphere) | [LTX-Video 13B distilled 0.9.8](https://huggingface.co/Lightricks) | 13 GB | 118s/clip on M5 — 5.6× faster than Wan |
+| Voice narration | [Piper TTS](https://github.com/rhasspy/piper) | LibriTTS_R medium + others | Per-voice presets in DSL |
+| Music + SFX | [Song Forge / ACE-Step](https://github.com/ace-step/ACE-Step) | 13 GB | Original instrumentals + scene SFX |
 | Compose | [ffmpeg 8.1](https://ffmpeg.org/) | — | xfade, sidechain ducking, fades, mux |
 | Title cards | [Pillow](https://pillow.readthedocs.io/) | — | PNG text overlays |
 
@@ -227,7 +378,7 @@ The output reads as "a person telling you a story," not "an AI generating speech
 
 ### 3. Music ducks under narration automatically
 
-The instrumental score plays throughout the film at -22 LUFS bed level. When the narrator speaks, ffmpeg's `sidechaincompress` filter ducks the music ~10 dB, then releases back. Zero manual mix automation.
+The instrumental score plays throughout the film at -22 LUFS bed level. When the narrator speaks, ffmpeg's `sidechaincompress` filter ducks the music ~10 dB, then releases back. Zero manual mix automation. Configurable in the DSL via `@mix duck voice -> music threshold=-22 ratio=4`.
 
 ### 4. Native-speed Wan, no slow-motion stretch
 
@@ -237,18 +388,9 @@ Many AI-video pipelines render 5-sec Wan clips and stretch them with `setpts*1.5
 
 Combining two independently-rendered films into one saga uses `xfade=transition=fadeblack` between them (visual time-jump bridge) and audio gap handling for clean narration handoff. No editor required.
 
-### 6. Scene-graph composition
+### 6. Per-scene engine routing
 
-Each scene is a record:
-```python
-{
-    "still":     "<Flux prompt>",
-    "motion":    "<Wan motion prompt>",
-    "narration": "<one storyteller line>",
-}
-```
-
-The pipeline iterates the list. Change one scene, only that scene re-renders. Add a scene, the timing math redistributes automatically.
+`bin/render-route` picks Wan vs LTX automatically based on the motion prompt — hero shots with character action go to Wan, atmospheric B-roll goes to LTX (~5.6× faster). The DSL also lets you pin the engine explicitly with `motion wan:` or `motion ltx:`.
 
 ---
 
@@ -258,16 +400,16 @@ Story Forge today is the proof. The next iteration is what makes it run in minut
 
 | Multiplier | Target gain | Status |
 |---|---|---|
-| **LTX-Video 13B distilled 0.9.8 for B-roll** | 5.6× vs Wan | ✅ **WORKING on M5 MPS** — 118s/clip via Lightricks' upstream multi-scale code. Public first. |
+| **LTX-Video 13B distilled 0.9.8 for B-roll** | 5.6× vs Wan | ✅ **WORKING on M5 MPS** — 118s/clip via Lightricks' upstream multi-scale code. |
+| **Custom Metal flash-attention kernel** | 2-3× on attention path | ✅ **WORKING** — 12.32× standalone, 2× end-to-end on Wan. |
 | **LPIPS-gated speedup harness** | (gate, not gain) | ✅ Built — `bin/measure-render`. Novel on Mac. |
 | **`render-route` engine auto-selector** | (routing, not gain) | ✅ Wired — auto-picks Wan vs LTX per scene heuristic. |
+| **Story Forge DSL compiler** | (productivity, not gain) | ✅ Shipped — parser/resolver/emitter/run, 16/16 tests pass. |
 | **Q4_K_M GGUF Wan on Mac mini** | ~3.6× memory drop | ✅ Working — but M4 Pro compute is the bottleneck (40 min/clip vs M5's 10 min). Mini stays batch tier. |
 | **EasyCache (DiT-native cache, kijai)** | 1.1-1.3× at 4 steps | 🔄 Test in flight. |
-| **Custom Metal flash-attention** | 2-3× on attention path | 🔄 First kernel in progress. Wiring proven. |
-| **2-step Wan distillation** | 2× perpetual | ⏳ Pending — overnight training on mini. |
-| **Story Forge DSL compiler** | (productivity, not gain) | 🔄 MVP parser in progress. |
-| **Multi-voice + Wav2Lip lip sync** | (feature, not speed) | ⏳ Multi-day. |
-| **Two-node parallel render** | 2× throughput | ✅ Plumbed, but M5 + mini together is bottlenecked by mini's 40 min/clip — only useful for batch jobs. |
+| **2-step Wan distillation** | 2× perpetual | ⏳ Scaffold ready, 12-hr overnight training pending. |
+| **Comprehensive harness comparison** | (validation, not gain) | ⏳ Pending after distill lands. |
+| **Multi-voice + Wav2Lip lip sync** | (feature, not speed) | 🔄 DSL flag wired (`with lipsync`); renderer pass pending. |
 
 Stacked target: **today's 5-hour render → ~10-30 min per 4-min film on M5.**
 
@@ -275,7 +417,7 @@ Stacked target: **today's 5-hour render → ~10-30 min per 4-min film on M5.**
 
 1. LTX 13B distilled 0.9.8 working on Apple Silicon MPS via Lightricks upstream Python
 2. LPIPS-gated speedup harness for Mac video diffusion (CI-style regression gates)
-3. Custom Metal kernels for Wan video DiT (wiring proven; flash-attn pending)
+3. Custom Metal flash-attention kernel for Wan video DiT — 12.32× vs PyTorch SDPA
 
 ### Benchmark to beat
 
