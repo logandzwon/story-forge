@@ -271,19 +271,45 @@ def _build_block_head(word: str, tail: str, after_colon: str,
                 "attrs": attrs, "children": [], "line": lineno}
 
     if word == "narrate":
-        # narrate <voice>:                         (block w/ line: child)
-        # narrate <voice> with lipsync:            (lipsync flag set)
-        # narrate <voice>: "Inline line text"      (inline single-line form)
-        # narrate <voice> with lipsync: "..."      (inline + lipsync)
-        lipsync = False
-        # Strip "with lipsync" from args, if present.
+        # narrate <voice>:                            (block w/ line: child)
+        # narrate <voice> with lipsync:               (lipsync flag set, default LP backend)
+        # narrate <voice> with lipsync=wav2lip:       (explicit Wav2Lip backend)
+        # narrate <voice> with lipsync=lp:            (explicit LP backend, same as bare flag)
+        # narrate <voice>: "Inline line text"         (inline single-line form)
+        # narrate <voice> with lipsync: "..."         (inline + lipsync)
+        #
+        # `lipsync` resolves to one of: False (no lipsync), "lp" (LivePortrait body-motion
+        # only — Matt's preferred default), or "wav2lip" (LP + Wav2Lip mouth pass).
+        lipsync: bool | str = False
+        # First, see if `lipsync` came through as a KV attr (e.g. `lipsync=wav2lip`).
+        if "lipsync" in attrs:
+            kv_val = attrs.pop("lipsync")
+            # Accept booleans + the two named backends; everything else falls back to LP.
+            if kv_val is True or (isinstance(kv_val, str)
+                                  and kv_val.lower() in ("lp", "liveportrait", "live-portrait")):
+                lipsync = "lp"
+            elif isinstance(kv_val, str) and kv_val.lower() in ("wav2lip", "w2l"):
+                lipsync = "wav2lip"
+            elif kv_val is False:
+                lipsync = False
+            else:
+                # Unknown backend string — leave as the raw value so the runner can warn.
+                lipsync = str(kv_val).lower()
+        # Strip "with lipsync" / "with" from args (bare-flag form, KV form left an
+        # orphaned "with" since `lipsync=...` was consumed by _parse_kvs).
         cleaned_args: list[str] = []
         i = 0
         while i < len(args):
             tok = args[i]
             if tok == "with" and i + 1 < len(args) and args[i + 1] == "lipsync":
-                lipsync = True
+                # Bare flag, no KV — default to LP backend.
+                if lipsync is False:
+                    lipsync = "lp"
                 i += 2
+                continue
+            if tok == "with":
+                # Orphaned "with" left over after _parse_kvs ate `lipsync=...`.
+                i += 1
                 continue
             cleaned_args.append(tok)
             i += 1

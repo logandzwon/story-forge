@@ -177,7 +177,17 @@ def resolve(ast: list[dict[str, Any]]) -> dict[str, Any]:
                         **kv}
                 if kind == "narrate":
                     # Lipsync flag travels with each narrate block.
-                    spec["lipsync"] = bool(child.get("lipsync", False))
+                    #   False           -> no lipsync (audio only)
+                    #   "lp"            -> LivePortrait body motion (default for `with lipsync:`)
+                    #   "wav2lip"       -> LP + Wav2Lip mouth rewrite
+                    raw_lip = child.get("lipsync", False)
+                    if raw_lip is True:
+                        # Back-compat: True == LP default.
+                        spec["lipsync"] = "lp"
+                    elif isinstance(raw_lip, str) and raw_lip:
+                        spec["lipsync"] = raw_lip
+                    else:
+                        spec["lipsync"] = False
                     spec["voice"] = engine  # preset name lookup convenience
                     # Per-narrate deterministic seed — each line gets a unique seed.
                     role = f"narrate_{narrate_index}"

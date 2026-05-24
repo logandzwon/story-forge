@@ -10,12 +10,44 @@ Two render paths:
 
 The IR -> config translation for the full path lives in
 `storyplan_to_pipeline_config()` so existing callers keep working.
+
+LIPSYNC INTEGRATION CONTRACT
+----------------------------
+When a `narration_spec.lipsync` is truthy (set by the DSL via
+`narrate <voice> with lipsync[=lp|=wav2lip]:`), the lean renderer:
+
+  1. Renders the Piper wav for the narration line as usual.
+  2. Spawns the avatar pipeline at
+     `~/Desktop/PROJECTS/avatar-pipeline/LivePortrait/inference.py` (LP-only,
+     Matt's preferred default) or — when `lipsync == "wav2lip"` — chains
+     the Wav2Lip mouth pass on top of the LP output. Driver still defaults to
+     `~/AI/videopipe/test_stills/walk_frame.png`; override via the
+     `LIPSYNC_DRIVER_STILL` env var (per scene override TBD).
+  3. Composites the resulting talking-head clip INTO the scene as a
+     lower-third overlay: bottom-right, ~30% scene width, 32px inset,
+     50ms crossfade in. The scene's base motion video is untouched
+     underneath; only that scene gets the head overlay.
+
+When `lipsync` is False (default) the renderer behaves exactly as before:
+narration audio only, no per-scene overlay.
+
+Backends understood:
+  - False    -> no lipsync, no overlay
+  - "lp"     -> LivePortrait only (body motion, mouth NOT phonetic). Default
+                when the DSL says `with lipsync:`.
+  - "wav2lip"-> LP + Wav2Lip whole-face pass (phonetic mouth but stiffer body).
+
+The avatar pipeline call is invoked through `_render_lipsync_clip()`. When
+the binaries are missing (no LP venv, no W2L checkpoint, no driver still)
+the runner logs and falls back to audio-only — the storyplan still
+renders, just without the head overlay.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -33,6 +65,21 @@ DEFAULT_OUT_DIR = HOME / "AI" / "videopipe" / "outputs"
 PIPER = HOME / "Library" / "Python" / "3.9" / "bin" / "piper"
 PIPER_MODEL = (HOME / "Desktop" / "PROJECTS" / "Song Forge"
                / "piper_voices" / "en_US-libritts_r-medium.onnx")
+
+# --- Avatar pipeline (LivePortrait + Wav2Lip) --------------------------------
+# Layout per ~/.myavatar-local/app.py: LP and W2L live under avatar-pipeline/.
+AVATAR_DIR = HOME / "Desktop" / "PROJECTS" / "avatar-pipeline"
+LP_DIR = AVATAR_DIR / "LivePortrait"
+LP_VENV_PYTHON = LP_DIR / ".venv" / "bin" / "python"
+LP_INFERENCE = LP_DIR / "inference.py"
+W2L_DIR = AVATAR_DIR / "Wav2Lip"
+W2L_CKPT = W2L_DIR / "checkpoints" / "wav2lip_gan.pth"
+DEFAULT_DRIVER_STILL = HOME / "AI" / "videopipe" / "test_stills" / "walk_frame.png"
+
+# Lower-third overlay knobs (kept in module scope so tests can monkeypatch).
+LIPSYNC_OVERLAY_SCALE_W = "iw*0.30"   # ~30% of scene width
+LIPSYNC_OVERLAY_INSET = 32            # pixels from the right and bottom edges
+LIPSYNC_OVERLAY_FADE = 0.05           # 50ms crossfade in
 
 # ---------------------------------------------------------------------------
 # Full-pipeline config translation (kept for --engine full / legacy use)
@@ -180,6 +227,181 @@ def _render_narration(line: str, voice_spec: dict[str, Any],
     return out_wav.exists()
 
 
+# ---------------------------------------------------------------------------
+# Lipsync (talking-head) overlay support
+# ---------------------------------------------------------------------------
+
+def _resolve_lipsync_backend(value: Any) -> str | None:
+    """Normalize `narration_spec.lipsync` into 'lp' | 'wav2lip' | None."""
+    if value in (None, False, ""):
+        return None
+    if value is True:
+        return "lp"
+    if isinstance(value, str):
+        v = value.lower().strip()
+        if v in ("lp", "liveportrait", "live-portrait", "true", "yes", "on"):
+            return "lp"
+        if v in ("wav2lip", "w2l"):
+            return "wav2lip"
+        # Unknown — caller will log + fall back to None.
+    return None
+
+
+def _lipsync_inputs_available(backend: str, driver_still: Path) -> bool:
+    """Return True iff the avatar pipeline can actually run for this backend."""
+    if not driver_still.exists():
+        print(f"[lipsync] driver still missing: {driver_still} — skipping",
+              flush=True)
+        return False
+    if not LP_INFERENCE.exists() or not LP_VENV_PYTHON.exists():
+        print(f"[lipsync] LP inference or venv missing under {LP_DIR} — skipping",
+              flush=True)
+        return False
+    if backend == "wav2lip" and not W2L_CKPT.exists():
+        print(f"[lipsync] wav2lip checkpoint missing: {W2L_CKPT} — falling back to lp",
+              flush=True)
+    return True
+
+
+def _render_lipsync_clip(audio_wav: Path, backend: str,
+                         driver_still: Path, out_mp4: Path,
+                         work_dir: Path) -> Path | None:
+    """Drive the avatar pipeline. Returns mp4 path on success, None on failure.
+
+    backend:
+        - "lp"      → LivePortrait inference.py, source=driver_still,
+                      driving=<a short driver clip>. We synthesize a driver clip
+                      from the still by holding it for the audio duration, then
+                      LP animates it. This keeps the entry-point contract:
+                      (source image, driving clip, output dir).
+        - "wav2lip" → LP output is then re-passed through Wav2Lip whole-face
+                      mouth rewrite, aligned to audio_wav.
+
+    NOTE: This is the integration scaffolding. The actual avatar pipeline
+    runs are slow (minutes per clip); the runner is expected to skip them
+    in test mode by setting STORY_FORGE_SKIP_AVATAR=1.
+    """
+    if os.environ.get("STORY_FORGE_SKIP_AVATAR") == "1":
+        print("[lipsync] STORY_FORGE_SKIP_AVATAR=1 — placeholder mp4 used",
+              flush=True)
+        # Touch a tiny placeholder so callers can still overlay something.
+        out_mp4.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _sh(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                 "-loop", "1", "-i", str(driver_still),
+                 "-i", str(audio_wav),
+                 "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                 "-r", "25", "-vf", "scale=512:512",
+                 "-c:a", "aac", str(out_mp4)])
+            return out_mp4
+        except Exception as exc:
+            print(f"[lipsync] placeholder build failed: {exc}", flush=True)
+            return None
+
+    if not _lipsync_inputs_available(backend, driver_still):
+        return None
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    # 1. Build a held-still driver clip matching the audio length so LP has
+    #    a driving video. Wav2Lip later rewrites the mouth region anyway.
+    driver_clip = work_dir / "driver_clip.mp4"
+    audio_dur = _ffprobe_duration(audio_wav)
+    try:
+        _sh(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-loop", "1", "-i", str(driver_still),
+             "-t", f"{audio_dur:.3f}", "-r", "25",
+             "-vf", "scale=512:512:force_original_aspect_ratio=increase,crop=512:512",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(driver_clip)])
+    except subprocess.CalledProcessError as exc:
+        print(f"[lipsync] driver clip build failed: {exc}", flush=True)
+        return None
+
+    # 2. LivePortrait pass.
+    lp_out_dir = work_dir / "lp"
+    lp_out_dir.mkdir(exist_ok=True)
+    lp_cmd = [
+        str(LP_VENV_PYTHON), "inference.py",
+        "-s", str(driver_still),
+        "-d", str(driver_clip),
+        "-o", str(lp_out_dir),
+        "--flag_use_half_precision",
+        "--no-flag_do_torch_compile",
+    ]
+    env = {**os.environ, "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
+    try:
+        subprocess.run(lp_cmd, cwd=LP_DIR, env=env, check=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"[lipsync] LP inference failed: {exc}", flush=True)
+        return None
+
+    lp_candidates = [p for p in lp_out_dir.glob("*.mp4") if "_concat" not in p.name]
+    if not lp_candidates:
+        print("[lipsync] LP produced no mp4 — aborting overlay", flush=True)
+        return None
+    lp_video = max(lp_candidates, key=lambda p: p.stat().st_size)
+
+    # 3. Optional Wav2Lip mouth pass.
+    if backend == "wav2lip" and W2L_CKPT.exists():
+        w2l_out = work_dir / "w2l.mp4"
+        w2l_cmd = [
+            str(LP_VENV_PYTHON), "inference.py",
+            "--checkpoint_path", str(W2L_CKPT),
+            "--face", str(lp_video),
+            "--audio", str(audio_wav),
+            "--outfile", str(w2l_out),
+            "--resize_factor", "1",
+            "--pads", "0", "5", "0", "0",
+            "--nosmooth",
+        ]
+        try:
+            subprocess.run(w2l_cmd, cwd=W2L_DIR, env=env, check=True)
+            final_src = w2l_out
+        except subprocess.CalledProcessError as exc:
+            print(f"[lipsync] Wav2Lip failed, using LP-only: {exc}", flush=True)
+            final_src = lp_video
+    else:
+        final_src = lp_video
+
+    # 4. Mux narration audio onto the head clip so the overlay carries voice
+    #    when composited downstream (the scene base track stays muted).
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _sh(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(final_src), "-i", str(audio_wav),
+             "-map", "0:v", "-map", "1:a",
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+             "-shortest", str(out_mp4)])
+    except subprocess.CalledProcessError as exc:
+        print(f"[lipsync] mux failed: {exc}", flush=True)
+        return None
+    return out_mp4
+
+
+def _overlay_lipsync_on_scene(scene_clip: Path, head_clip: Path,
+                              out_mp4: Path) -> None:
+    """Composite the head clip as a lower-third on the scene clip.
+
+    Bottom-right corner, ~30% scene width, 32px inset, 50ms crossfade in.
+    The scene clip is muted under the overlay's mouth track.
+    """
+    if out_mp4.exists():
+        out_mp4.unlink()
+    inset = LIPSYNC_OVERLAY_INSET
+    fade = LIPSYNC_OVERLAY_FADE
+    scale = LIPSYNC_OVERLAY_SCALE_W
+    # [1:v] scaled to ~30% width, with crossfade-in alpha; placed bottom-right.
+    fc = (f"[1:v]scale={scale}:-2,format=yuva420p,"
+          f"fade=in:st=0:d={fade}:alpha=1[ov];"
+          f"[0:v][ov]overlay=W-w-{inset}:H-h-{inset}:format=auto[outv]")
+    _sh(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-i", str(scene_clip), "-i", str(head_clip),
+         "-filter_complex", fc,
+         "-map", "[outv]",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         "-preset", "medium", "-crf", "18",
+         "-an", str(out_mp4)])
+
+
 def _stitch(clips: list[Path], out_mp4: Path,
             xfade: float = 0.5, scene_dur: float = 5.0) -> None:
     """xfade-stitch the visual track (no audio) -> out_mp4."""
@@ -268,11 +490,18 @@ def render_lean(plan: dict[str, Any],
     enhanced_clips: list[Path] = []
     narration_pieces: list[tuple[int, Path]] = []  # (scene_index_1based, wav)
 
+    driver_still_env = os.environ.get("LIPSYNC_DRIVER_STILL")
+    driver_still = (Path(driver_still_env) if driver_still_env
+                    else DEFAULT_DRIVER_STILL)
+
     for idx, (name, sc) in enumerate(scenes.items(), start=1):
         print(f"\n=== scene {idx}/{len(scenes)}: {name} ===", flush=True)
         still_spec = sc.get("still_spec") or {}
         motion_spec = sc.get("motion_spec") or {}
         narrate_spec = sc.get("narration_spec") or {}
+        # Prefer the plural list; fall back to singular for back-compat plans.
+        narrate_specs = sc.get("narration_specs") or (
+            [narrate_spec] if narrate_spec else [])
 
         still_prompt = still_spec.get("prompt", "")
         motion_prompt = motion_spec.get("prompt", "")
@@ -298,16 +527,40 @@ def render_lean(plan: dict[str, Any],
 
         # 3. Conform
         _conform_clip(raw_mp4, conformed, scene_dur=duration)
-        enhanced_clips.append(conformed)
 
-        # 4. Narration piece (per scene)
-        line = (narrate_spec or {}).get("line", "").strip()
-        if line:
-            voice_name = narrate_spec.get("engine")  # 'narrate warm:' -> 'warm'
+        # 4. Narration pieces + per-spec lipsync overlay (per scene, in order).
+        scene_visual = conformed
+        for n_i, n_spec in enumerate(narrate_specs):
+            line = (n_spec or {}).get("line", "").strip()
+            if not line:
+                continue
+            voice_name = n_spec.get("voice") or n_spec.get("engine")
             voice_spec = voice_presets.get(voice_name) or default_voice
-            piece = work_dir / "vo_pieces" / f"p_{idx:02d}.wav"
-            if _render_narration(line, voice_spec, piece):
-                narration_pieces.append((idx, piece))
+            piece = (work_dir / "vo_pieces"
+                     / f"p_{idx:02d}_{n_i:02d}.wav")
+            if not _render_narration(line, voice_spec, piece):
+                continue
+            narration_pieces.append((idx, piece))
+
+            backend = _resolve_lipsync_backend(n_spec.get("lipsync"))
+            if not backend:
+                continue
+            head_dir = work_dir / "lipsync" / f"s{idx:02d}_n{n_i:02d}"
+            head_mp4 = head_dir / "head.mp4"
+            print(f"[lipsync] scene={name} narrate#{n_i} backend={backend}",
+                  flush=True)
+            head_clip = _render_lipsync_clip(
+                piece, backend, driver_still, head_mp4, head_dir)
+            if head_clip and head_clip.exists():
+                overlaid = work_dir / f"clip_{idx:02d}_overlay.mp4"
+                try:
+                    _overlay_lipsync_on_scene(
+                        scene_visual, head_clip, overlaid)
+                    scene_visual = overlaid
+                except subprocess.CalledProcessError as exc:
+                    print(f"[lipsync] overlay failed for {name}: {exc}",
+                          flush=True)
+        enhanced_clips.append(scene_visual)
 
     # 5. Stitch visuals (use the first scene's duration as scene_dur for offsets;
     #    when scenes differ in length this is approximate but acceptable for MVP)

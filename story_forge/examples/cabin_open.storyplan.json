@@ -218,7 +218,7 @@
         "engine": "warm",
         "attrs": {},
         "line": "And the cold outside became a story she would only tell on warm nights.",
-        "lipsync": true,
+        "lipsync": "lp",
         "voice": "warm",
         "seed": 678811593
       },
@@ -227,7 +227,7 @@
           "engine": "warm",
           "attrs": {},
           "line": "And the cold outside became a story she would only tell on warm nights.",
-          "lipsync": true,
+          "lipsync": "lp",
           "voice": "warm",
           "seed": 678811593
         }

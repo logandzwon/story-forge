@@ -739,9 +739,36 @@ def api_live():
         return jsonify({"error": str(e)}), 500
 
 
+_DURATION_CACHE: dict[str, tuple[float, float]] = {}
+
+
+def _probe_duration(p: Path) -> float:
+    """Best-effort ffprobe duration in seconds, cached by (path, mtime)."""
+    try:
+        mtime = p.stat().st_mtime
+    except Exception:
+        return 0.0
+    cached = _DURATION_CACHE.get(str(p))
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(p)],
+            capture_output=True, text=True, timeout=4,
+        )
+        dur = float((r.stdout or "0").strip() or 0)
+    except Exception:
+        dur = 0.0
+    _DURATION_CACHE[str(p)] = (mtime, dur)
+    return dur
+
+
 @app.route("/api/recent")
 def api_recent():
-    """List the last 6 .mp4 files in OUT_DIR with size + mtime metadata."""
+    """List the last 6 .mp4 files in OUT_DIR with size, mtime, and film
+    duration (so the UI can render film length in MM:SS, not raw seconds)."""
     if not OUT_DIR.is_dir():
         return jsonify({"items": []})
     mp4s = sorted(OUT_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)[:6]
@@ -763,6 +790,7 @@ def api_recent():
             "size_mb": st.st_size / 1024 / 1024,
             "mtime": st.st_mtime,
             "age": age,
+            "duration_s": round(_probe_duration(p), 2),
         })
     return jsonify({"items": items})
 
