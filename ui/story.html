@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Story Forge</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/editor/editor.main.css">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --card: #131826;
+  --card2: #1a2033;
+  --border: #2a3450;
+  --text: #e8ecf4;
+  --muted: #8893ab;
+  --done: #34d399;
+  --inprog: #fbbf24;
+  --pending: #6b7691;
+  --error: #f87171;
+  --accent: #60a5fa;
+  --purple: #a78bfa;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  min-height: 100vh;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: Menlo, "SF Mono", monospace; }
+
+.shell {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 18px 22px 60px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+header h1 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+header .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+header nav {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+header nav a {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+header nav a.active {
+  color: var(--text);
+  background: var(--card);
+  border-color: var(--border);
+}
+
+/* Top bar: big render button + ETA */
+.bar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: stretch;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.bar .meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+.bar .meta .row1 {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.bar .meta .row1 b { color: var(--text); font-weight: 600; }
+.bar .meta .eta {
+  font-size: 18px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.bar .meta .eta .label { color: var(--muted); font-size: 11px; text-transform: uppercase; margin-right: 8px; letter-spacing: 0.05em; font-weight: 400; }
+button.render {
+  background: var(--accent);
+  color: #052036;
+  border: none;
+  border-radius: 10px;
+  padding: 18px 32px;
+  font: 600 16px/1 -apple-system, sans-serif;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+}
+button.render:hover { background: #7ab6ff; }
+button.render:disabled { opacity: 0.55; cursor: wait; }
+
+/* Three-column body */
+.body {
+  display: grid;
+  grid-template-columns: 220px 1fr 320px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1200px) {
+  .body { grid-template-columns: 1fr; }
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.card h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card h2 .badge {
+  background: var(--card2);
+  color: var(--muted);
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Engine panel */
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.toggle:last-child { border-bottom: none; }
+.toggle .lbl { font-size: 13px; }
+.toggle .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.switch {
+  width: 36px;
+  height: 20px;
+  background: var(--card2);
+  border-radius: 999px;
+  position: relative;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 1px; left: 1px;
+  width: 16px; height: 16px;
+  background: var(--muted);
+  border-radius: 50%;
+  transition: all 0.15s;
+}
+.toggle.on .switch { background: var(--accent); border-color: var(--accent); }
+.toggle.on .switch::after { background: #052036; transform: translateX(16px); }
+
+/* Editor area */
+.editor-wrap {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.editor-head .filename {
+  font-family: Menlo, monospace;
+  color: var(--text);
+}
+.editor-head .right {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.editor-head button {
+  background: var(--card2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font: 11px/1.3 inherit;
+  cursor: pointer;
+}
+.editor-head button:hover { color: var(--text); border-color: var(--accent); }
+#editor { width: 100%; height: 540px; }
+
+/* Live status */
+.live-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.live-row:last-child { border-bottom: none; }
+.live-row .k { color: var(--muted); font-size: 12px; }
+.live-row .v { font-family: Menlo, monospace; font-size: 12px; }
+.dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.dot.up { background: var(--done); box-shadow: 0 0 6px var(--done); }
+.dot.down { background: var(--error); }
+.tail {
+  font-family: Menlo, monospace;
+  font-size: 10px;
+  color: var(--text);
+  opacity: 0.75;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  margin: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Job status banner */
+.job-banner {
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  font-size: 12px;
+  display: none;
+}
+.job-banner.show { display: block; }
+.job-banner.run { border-color: var(--inprog); }
+.job-banner.ok { border-color: var(--done); }
+.job-banner.err { border-color: var(--error); }
+.job-banner .id { font-family: Menlo, monospace; color: var(--muted); }
+.job-banner pre {
+  margin-top: 6px;
+  font-family: Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* Gallery */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.tile {
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.tile .thumb {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #050810 center/cover no-repeat;
+  border-bottom: 1px solid var(--border);
+}
+.tile .info {
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.tile .name {
+  font-family: Menlo, monospace;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tile .sub {
+  color: var(--muted);
+  margin-top: 2px;
+  display: flex;
+  justify-content: space-between;
+}
+
+footer {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<header>
+  <div>
+    <h1>Story Forge</h1>
+    <div class="sub">DSL-first local cinema pipeline</div>
+  </div>
+  <nav>
+    <a href="/" >Single Clip</a>
+    <a href="/story" class="active">Story (DSL)</a>
+    <a href="/story-classic">Classic Form</a>
+    <a href="http://127.0.0.1:17602/" target="_blank">Build Dashboard</a>
+  </nav>
+</header>
+
+<div class="bar">
+  <div class="meta">
+    <div class="row1">
+      <span><b id="bar-scenes">0</b> scenes</span>
+      <span><b id="bar-length">0:00</b> film length</span>
+      <span><b id="bar-engines">-</b></span>
+      <span><b id="bar-bytes">0</b> bytes</span>
+    </div>
+    <div class="eta"><span class="label">ETA</span><span id="bar-eta">paste a .sf script</span></div>
+  </div>
+  <button class="render" id="renderBtn">Render</button>
+</div>
+
+<div class="body">
+
+  <aside>
+    <div class="card">
+      <h2>Engines</h2>
+      <div class="toggle on" data-key="metal_flash">
+        <div>
+          <div class="lbl">Metal flash-attn (Wan)</div>
+          <div class="hint">WAN_METAL_FUSED</div>
+        </div>
+        <div class="switch"></div>
+      </div>
+      <div class="toggle" data-key="mini_q4">
+        <div>
+          <div class="lbl">Use mini for Wan Q4</div>
+          <div class="hint">offload eligible scenes</div>
+        </div>
+        <div class="switch"></div>
+      </div>
+      <div class="toggle on" data-key="quality_gate">
+        <div>
+          <div class="lbl">Quality gate</div>
+          <div class="hint">LPIPS post-check</div>
+        </div>
+        <div class="switch"></div>
+      </div>
+      <div class="toggle on" data-key="voice_clone">
+        <div>
+          <div class="lbl">Voice cloning</div>
+          <div class="hint">Matt's clone</div>
+        </div>
+        <div class="switch"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <h2>Examples</h2>
+      <div id="examples" style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+        <a href="#" data-load="cabin_open.sf">cabin_open.sf</a>
+        <a href="#" data-load="test_tiny.sf">test_tiny.sf</a>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="editor-wrap">
+      <div class="editor-head">
+        <span class="filename" id="filename">untitled.sf</span>
+        <span class="right">
+          <button id="btn-fmt">Reformat</button>
+          <button id="btn-clear">Clear</button>
+        </span>
+      </div>
+      <div id="editor"></div>
+    </div>
+
+    <div class="job-banner" id="jobBanner"></div>
+
+    <div class="card" style="margin-top:16px;">
+      <h2>Recent renders <span class="badge" id="gallery-count">0</span></h2>
+      <div class="gallery" id="gallery"></div>
+    </div>
+  </main>
+
+  <aside>
+    <div class="card">
+      <h2>Live status <span class="badge" id="live-age">-</span></h2>
+      <div class="live-row">
+        <span class="k">M5 ComfyUI</span>
+        <span class="v" id="m5-state">-</span>
+      </div>
+      <div class="live-row">
+        <span class="k">mini ComfyUI</span>
+        <span class="v" id="mini-state">-</span>
+      </div>
+      <div class="live-row">
+        <span class="k">Active python</span>
+        <span class="v" id="active-py">0</span>
+      </div>
+      <div class="live-row">
+        <span class="k">Last LPIPS gate</span>
+        <span class="v" id="lpips">-</span>
+      </div>
+      <div style="margin-top:10px;">
+        <div class="k" style="font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">m5 comfy tail</div>
+        <div id="tail-m5"></div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<footer>
+  <span>Story Forge - local-only generative cinema</span>
+  <span>
+    <a href="https://github.com/nicedreamzapp/story-forge" target="_blank">GitHub</a>
+    &nbsp;-&nbsp;
+    <a href="http://127.0.0.1:17602/" target="_blank">Build dashboard</a>
+    &nbsp;-&nbsp;
+    <a href="/story-classic">Classic form</a>
+  </span>
+</footer>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/loader.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+
+const DEFAULT_SF = `# untitled.sf - one scene per "scene" block
+# See examples in the left panel for the full grammar.
+
+$style = "Studio Ghibli watercolor, soft light, painterly, 4k"
+
+film "Untitled" slug=untitled target=m5+mini scene_dur=8.5
+
+voice warm: piper/en_US-libritts_r-medium speaker=0 length=1.18
+
+scene opening:
+    still flux:
+        prompt: "{$style}, wide shot of a lantern in fog"
+        seed: auto
+    motion wan:
+        prompt: "slow handheld push-in, drifting fog"
+        duration: 5.0
+    narrate warm:
+        line: "It began as most stories do, with a small light in a dark place."
+`;
+
+// ---------- Monaco -----------
+let editor = null;
+require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs' }});
+require(['vs/editor/editor.main'], function () {
+  monaco.languages.register({ id: 'sf' });
+  monaco.languages.setMonarchTokensProvider('sf', {
+    defaultToken: '',
+    tokenizer: {
+      root: [
+        [/#.*$/, 'comment'],
+        [/"[^"]*"/, 'string'],
+        [/\b(film|scene|still|motion|narrate|voice|music|target|slug|scene_dur|prompt|seed|duration|line|speaker|length|vol|dur)\b/, 'keyword'],
+        [/@\w+/, 'type'],
+        [/\$\w+/, 'variable'],
+        [/\b(flux|wan|ltx|piper|ace|m5|mini)\b/, 'type.identifier'],
+        [/\b\d+(\.\d+)?\b/, 'number'],
+        [/[:=]/, 'delimiter'],
+      ]
+    }
+  });
+  monaco.editor.defineTheme('sf-dark', {
+    base: 'vs-dark', inherit: true, rules: [
+      { token: 'comment', foreground: '6b7691', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '60a5fa' },
+      { token: 'string', foreground: '34d399' },
+      { token: 'variable', foreground: 'a78bfa' },
+      { token: 'type', foreground: 'fbbf24' },
+      { token: 'type.identifier', foreground: 'fbbf24' },
+      { token: 'number', foreground: 'f87171' },
+    ],
+    colors: { 'editor.background': '#0c1120' }
+  });
+  editor = monaco.editor.create($('editor'), {
+    value: DEFAULT_SF,
+    language: 'sf',
+    theme: 'sf-dark',
+    fontFamily: 'Menlo, "SF Mono", monospace',
+    fontSize: 13,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    wordWrap: 'on',
+    lineNumbers: 'on',
+    renderLineHighlight: 'gutter',
+  });
+  editor.onDidChangeModelContent(updateEstimate);
+  updateEstimate();
+});
+
+// ---------- Toggles -----------
+document.querySelectorAll('.toggle').forEach(t => {
+  t.addEventListener('click', () => {
+    t.classList.toggle('on');
+    updateEstimate();
+  });
+});
+function toggleState(key) {
+  const t = document.querySelector(`.toggle[data-key="${key}"]`);
+  return t && t.classList.contains('on');
+}
+
+// ---------- ETA estimator -----------
+// Surface-parse a .sf script for: scene count, motion engines per scene,
+// the film-level default scene_dur, and any per-scene motion `duration: X`
+// overrides. Returns total film length in seconds so the UI can think in
+// minutes, never in raw "5-sec clip" units.
+function parseSf(text) {
+  const lines = text.split('\n');
+  let defaultSceneDur = 8.5;
+  // film header
+  for (const raw of lines) {
+    const t = raw.replace(/#.*$/, '').trim();
+    if (!t.startsWith('film ')) continue;
+    const m = t.match(/scene_dur\s*=\s*([0-9.]+)/);
+    if (m) defaultSceneDur = parseFloat(m[1]) || defaultSceneDur;
+    break;
+  }
+  // walk scenes, tracking each scene's motion engine + duration override
+  const scenes = []; // [{engine, dur}]
+  let cur = null;
+  let inMotion = false;
+  for (const raw of lines) {
+    const noComment = raw.replace(/#.*$/, '');
+    const t = noComment.trim();
+    if (!t) continue;
+    if (/^scene\s+[\w-]+\s*:/.test(t)) {
+      if (cur) scenes.push(cur);
+      cur = { engine: 'wan', dur: defaultSceneDur };
+      inMotion = false;
+      continue;
+    }
+    if (!cur) continue;
+    let m = t.match(/^motion\s+(\w+)\s*:/);
+    if (m) {
+      cur.engine = m[1];
+      inMotion = true;
+      continue;
+    }
+    if (/^(still|narrate|music|sfx|voice)\s+\w+\s*:/.test(t)) {
+      inMotion = false;
+      continue;
+    }
+    if (inMotion) {
+      const dm = t.match(/^duration\s*:\s*([0-9.]+)/);
+      if (dm) cur.dur = parseFloat(dm[1]) || cur.dur;
+    }
+  }
+  if (cur) scenes.push(cur);
+  return { scenes, defaultSceneDur };
+}
+
+function fmtMMSS(sec) {
+  if (!sec || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec - m * 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function fmtRenderMinutes(s) {
+  // Render ETA is always expressed in minutes (or hours) at the user-facing
+  // level — never in raw seconds. The 5-second native Wan limit is hidden
+  // behind the DSL stitch logic, so per-clip seconds are not user-relevant.
+  if (s < 60) return `about 1 min`;
+  const mins = s / 60;
+  if (mins < 60) return `about ${Math.round(mins)} min`;
+  const hrs = Math.floor(mins / 60);
+  const rem = Math.round(mins - hrs * 60);
+  if (rem === 0) return `about ${hrs} hr`;
+  return `about ${hrs} hr ${rem} min`;
+}
+
+function estimateSeconds(text) {
+  const { scenes } = parseSf(text);
+  if (scenes.length === 0) return { renderS: 0, filmS: 0, sceneCount: 0, engines: '-' };
+  const useMini = toggleState('mini_q4');
+  const useMetal = toggleState('metal_flash');
+  // Per-scene wall-clock render cost (seconds) — based on the engine choice
+  // and toggles. Scaled by the scene's stitched length (every additional 5s
+  // chunk inside a single scene roughly proportionally adds cost).
+  const baseCost = (engine) => {
+    if (useMini) return 2400; // wan_q4_mini
+    if (engine === 'ltx') return 120;
+    if (engine === 'wan' && useMetal) return 300;
+    if (engine === 'wan') return 600;
+    return 600; // default to wan
+  };
+  let renderS = 0;
+  let filmS = 0;
+  const engineSet = new Set();
+  for (const sc of scenes) {
+    const chunks = Math.max(1, Math.ceil(sc.dur / 5));
+    renderS += baseCost(sc.engine) * chunks;
+    filmS += sc.dur;
+    if (useMini) engineSet.add('wan_q4_mini');
+    else if (sc.engine === 'wan' && useMetal) engineSet.add('wan+metal');
+    else engineSet.add(sc.engine);
+  }
+  return {
+    renderS,
+    filmS,
+    sceneCount: scenes.length,
+    engines: Array.from(engineSet).join(', '),
+  };
+}
+
+function updateEstimate() {
+  if (!editor) return;
+  const text = editor.getValue();
+  const est = estimateSeconds(text);
+  $('bar-scenes').textContent = est.sceneCount;
+  $('bar-length').textContent = fmtMMSS(est.filmS);
+  $('bar-engines').textContent = est.engines || '-';
+  $('bar-bytes').textContent = new Blob([text]).size;
+  if (est.sceneCount > 0) {
+    // Phrase the ETA in minutes for a film of MM:SS length.
+    $('bar-eta').textContent =
+      `${fmtRenderMinutes(est.renderS)} for a ${fmtMMSS(est.filmS)} film`;
+  } else {
+    $('bar-eta').textContent = 'paste a .sf script';
+  }
+}
+
+// ---------- Buttons -----------
+$('btn-clear').addEventListener('click', () => {
+  if (editor) editor.setValue('');
+});
+$('btn-fmt').addEventListener('click', () => {
+  if (!editor) return;
+  // Tiny re-format: trim trailing spaces, collapse 3+ blank lines.
+  const txt = editor.getValue()
+    .split('\n').map(l => l.replace(/\s+$/, '')).join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+  editor.setValue(txt);
+});
+
+document.querySelectorAll('#examples a[data-load]').forEach(a => {
+  a.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const name = a.dataset.load;
+    try {
+      const r = await fetch('/api/example/' + name);
+      if (!r.ok) throw new Error('http ' + r.status);
+      const txt = await r.text();
+      if (editor) {
+        editor.setValue(txt);
+        $('filename').textContent = name;
+      }
+    } catch (err) {
+      alert('Failed to load example: ' + err.message);
+    }
+  });
+});
+
+// ---------- Render -----------
+let currentJob = null;
+let jobPollTimer = null;
+
+$('renderBtn').addEventListener('click', async () => {
+  if (!editor) return;
+  const text = editor.getValue().trim();
+  if (!text) { alert('Editor is empty.'); return; }
+  if (!/^\s*scene\s+/m.test(text)) { alert('No "scene" block found in script.'); return; }
+
+  const btn = $('renderBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  const overrides = {
+    metal_flash: toggleState('metal_flash'),
+    mini_q4: toggleState('mini_q4'),
+    quality_gate: toggleState('quality_gate'),
+    voice_clone: toggleState('voice_clone'),
+  };
+  try {
+    const r = await fetch('/api/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sf: text, overrides })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || 'http ' + r.status);
+    currentJob = data.job_id;
+    showJob('run', `Job <span class="id">${data.job_id}</span> submitted. ETA ${fmtRenderMinutes(data.eta_s || 0)}.`);
+    btn.textContent = 'Rendering...';
+    pollJob();
+  } catch (e) {
+    showJob('err', `Submit failed: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Render';
+  }
+});
+
+function showJob(kind, html) {
+  const b = $('jobBanner');
+  b.className = 'job-banner show ' + kind;
+  b.innerHTML = html;
+}
+
+async function pollJob() {
+  if (!currentJob) return;
+  try {
+    const r = await fetch('/api/render/' + currentJob + '/status');
+    const s = await r.json();
+    const id = `<span class="id">${currentJob}</span>`;
+    if (s.state === 'done') {
+      const tookMin = ((s.elapsed_s || 0) / 60).toFixed(1);
+      showJob('ok', `Job ${id} done in ${tookMin} min. <a href="/api/output/${s.mp4_name}" target="_blank">play</a> &middot; <pre>${escapeHtml(s.tail || '')}</pre>`);
+      $('renderBtn').disabled = false;
+      $('renderBtn').textContent = 'Render';
+      currentJob = null;
+      loadGallery();
+      return;
+    }
+    if (s.state === 'error') {
+      showJob('err', `Job ${id} error. <pre>${escapeHtml(s.tail || s.error || '')}</pre>`);
+      $('renderBtn').disabled = false;
+      $('renderBtn').textContent = 'Render';
+      currentJob = null;
+      return;
+    }
+    const elapsed = s.elapsed_s || 0;
+    const eta = Math.max(0, (s.eta_s || 0) - elapsed);
+    const elapsedMin = (elapsed / 60).toFixed(1);
+    showJob('run', `Job ${id} running. ${elapsedMin} min elapsed, ${fmtRenderMinutes(eta)} left.<pre>${escapeHtml(s.tail || '')}</pre>`);
+  } catch (e) {}
+  jobPollTimer = setTimeout(pollJob, 4000);
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+}
+
+// ---------- Live status -----------
+async function loadLive() {
+  try {
+    const r = await fetch('/api/live');
+    const j = await r.json();
+    const m5 = j.m5_comfy || {};
+    const mini = j.mini_comfy || {};
+    $('m5-state').innerHTML =
+      `<span class="dot ${m5.alive ? 'up' : 'down'}"></span>` +
+      (m5.alive ? `run ${m5.running} / pend ${m5.pending}` : 'down');
+    $('mini-state').innerHTML =
+      `<span class="dot ${mini.alive ? 'up' : 'down'}"></span>` +
+      (mini.alive ? `run ${mini.running} / pend ${mini.pending}` : 'down');
+    $('active-py').textContent = (j.active_python_procs || []).length;
+    $('live-age').textContent = j.ticker_updated_at ? j.ticker_updated_at.split('T')[1] : '-';
+
+    // pull LPIPS from bench tail if present
+    const benchTail = (j.log_tails && j.log_tails.bench_wan_e2e) || [];
+    const lpipsLine = benchTail.reverse().find(l => l.includes('LPIPS') || l.includes('GATE'));
+    $('lpips').textContent = lpipsLine ? lpipsLine.trim().slice(0, 30) : '-';
+
+    const m5tail = (j.log_tails && j.log_tails.m5_comfy) || [];
+    $('tail-m5').innerHTML = m5tail.slice(-5).map(l => `<div class="tail">${escapeHtml(l)}</div>`).join('') || '<div class="tail">(no recent activity)</div>';
+  } catch (e) {
+    $('m5-state').textContent = 'ticker offline';
+  }
+  setTimeout(loadLive, 30000);
+}
+loadLive();
+
+// ---------- Recent gallery -----------
+async function loadGallery() {
+  try {
+    const r = await fetch('/api/recent');
+    const j = await r.json();
+    const items = j.items || [];
+    $('gallery-count').textContent = items.length;
+    $('gallery').innerHTML = items.map(it => `
+      <div class="tile">
+        <a href="/api/output/${encodeURIComponent(it.name)}" target="_blank">
+          <div class="thumb" style="background-image:url(/thumb/${encodeURIComponent(it.name)}.jpg)"></div>
+        </a>
+        <div class="info">
+          <div class="name" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</div>
+          <div class="sub">
+            <span>${fmtMMSS(it.duration_s || 0)}</span>
+            <span>${it.age || ''}</span>
+          </div>
+        </div>
+      </div>
+    `).join('') || '<div style="color:var(--muted);font-size:12px;">no renders yet</div>';
+  } catch (e) {
+    $('gallery').innerHTML = '<div style="color:var(--error);font-size:12px;">failed to load: ' + e.message + '</div>';
+  }
+}
+loadGallery();
+setInterval(loadGallery, 60000);
+</script>
+
+</body>
+</html>

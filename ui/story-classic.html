@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Story Forge (Classic)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root {
+  --bg: #0b0811;
+  --fg: #f5f0ff;
+  --muted: #8b83a1;
+  --accent: #ec4899;
+  --accent2: #a855f7;
+  --good: #22c55e;
+  --bad: #ef4444;
+  --card: rgba(255,255,255,0.04);
+  --border: rgba(255,255,255,0.08);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background:
+    radial-gradient(1100px 900px at 15% 10%, rgba(236,72,153,0.18), transparent 60%),
+    radial-gradient(900px 800px at 85% 90%, rgba(168,85,247,0.16), transparent 60%),
+    var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  min-height: 100vh;
+}
+.app { max-width: 760px; margin: 0 auto; padding: 32px 28px 80px; }
+header {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 20px;
+}
+header .dot {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: grid; place-items: center; font-size: 22px;
+}
+header h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+header .sub { font-size: 13px; color: var(--muted); }
+nav { display: flex; gap: 12px; margin-left: auto; }
+nav a {
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  padding: 6px 12px; border-radius: 8px;
+}
+nav a.active { color: var(--fg); background: var(--card); border: 1px solid var(--border); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 18px;
+}
+
+label.field { display: block; margin-bottom: 18px; }
+label.field .l {
+  display: flex; justify-content: space-between;
+  font-size: 13px; color: var(--muted); margin-bottom: 8px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+
+textarea, input, select, button { font: inherit; color: inherit; }
+textarea, input[type="text"], select {
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--fg);
+  outline: none;
+}
+textarea { resize: vertical; min-height: 100px; font-family: inherit; }
+textarea.scenes { min-height: 220px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+textarea:focus, input:focus, select:focus { border-color: var(--accent); }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  padding: 8px 14px; border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  cursor: pointer; font-size: 13px; color: var(--muted);
+}
+.chip.on { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border-color: transparent; }
+
+button.primary {
+  display: block; width: 100%;
+  padding: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white; border: none; border-radius: 14px;
+  font-size: 17px; font-weight: 600; letter-spacing: 0.01em;
+  cursor: pointer;
+}
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.status-bar {
+  font-size: 13px; color: var(--muted);
+  padding: 12px 16px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+.scene-count {
+  font-size: 12px; color: var(--muted);
+  text-align: right;
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="dot">SF</div>
+    <div>
+      <h1>Story Forge (Classic)</h1>
+      <div class="sub">Pre-DSL form workflow - kept for compatibility</div>
+    </div>
+    <nav>
+      <a href="/">Single Clip</a>
+      <a href="/story">Story (DSL)</a>
+      <a href="/story-classic" class="active">Classic Form</a>
+    </nav>
+  </header>
+
+  <div id="status" class="status-bar">Idle. Fill out the form and click Forge Story to begin.</div>
+
+  <div class="card">
+    <div class="row2">
+      <label class="field">
+        <div class="l"><span>Title</span></div>
+        <input type="text" id="title" placeholder="The Bear Sister" value="">
+      </label>
+      <label class="field">
+        <div class="l"><span>Slug (folder name)</span></div>
+        <input type="text" id="slug" placeholder="bear-sister" value="">
+      </label>
+    </div>
+
+    <label class="field">
+      <div class="l"><span>Style</span></div>
+      <select id="style">
+        <option value="Studio Ghibli watercolor animation, hand-painted backgrounds, warm storybook color palette, soft glowing light, expressive 2D animation, Miyazaki style, cinematic composition, painterly textures">Studio Ghibli watercolor</option>
+        <option value="Pixar-style 3D animation, hyper-detailed, warm cinematic lighting, expressive characters, soft volumetric light, smooth shaders">Pixar 3D animation</option>
+        <option value="Anime film still, hand-drawn 2D animation, expressive line work, vivid color palette, dynamic composition, Makoto Shinkai style lighting">Anime film</option>
+        <option value="storybook illustration, children's picture book art, soft pastel watercolor, warm hand-painted style, gentle expressive characters">Storybook illustration</option>
+        <option value="photoreal cinematic, sharp focus, 35mm film grain, natural golden hour lighting, professional cinematography">Photoreal cinematic</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <div class="l"><span>Character signature</span><span class="hint">(used in every scene prompt to keep characters consistent)</span></div>
+      <input type="text" id="character" placeholder="a small brave little child in a red wool hooded cloak">
+    </label>
+  </div>
+
+  <div class="card">
+    <label class="field">
+      <div class="l">
+        <span>Scenes - one per line</span>
+        <span class="scene-count" id="sceneCount">0 scenes</span>
+      </div>
+      <textarea class="scenes" id="scenes" placeholder="Each line = one 8.5-second scene."></textarea>
+    </label>
+
+    <label class="field">
+      <div class="l">
+        <span>Narration - one line per scene</span>
+        <span class="hint">Leave blank for no narration. Lines must match scene count.</span>
+      </div>
+      <textarea class="scenes" id="narration" placeholder="One line of narration per scene."></textarea>
+    </label>
+  </div>
+
+  <div class="card">
+    <label class="field">
+      <div class="l"><span>Voice</span></div>
+      <div class="chips" id="voiceChips">
+        <div class="chip on" data-voice="warm_female_storyteller">Warm female storyteller</div>
+        <div class="chip" data-voice="none">No narration</div>
+      </div>
+    </label>
+
+    <label class="field">
+      <div class="l"><span>Overlays</span></div>
+      <div class="chips" id="overlayChips">
+        <div class="chip on" data-overlay="dust_all">Dust motes (all)</div>
+        <div class="chip on" data-overlay="film_grain">Film grain</div>
+        <div class="chip on" data-overlay="vignette">Vignette</div>
+        <div class="chip on" data-overlay="auto_color">Auto color grade</div>
+        <div class="chip on" data-overlay="auto_particles">Auto particles</div>
+      </div>
+    </label>
+  </div>
+
+  <button class="primary" id="forge">Forge Story</button>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const sceneTextarea = $('scenes');
+const narrationTextarea = $('narration');
+const sceneCount = $('sceneCount');
+const statusEl = $('status');
+
+function lineCount(text) {
+  return text.split('\n').map(s => s.trim()).filter(Boolean).length;
+}
+sceneTextarea.addEventListener('input', () => {
+  sceneCount.textContent = `${lineCount(sceneTextarea.value)} scenes`;
+});
+
+function bindChips(containerId) {
+  $(containerId).querySelectorAll('.chip').forEach(c => {
+    c.addEventListener('click', () => {
+      if (containerId === 'voiceChips') {
+        $(containerId).querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+        c.classList.add('on');
+      } else {
+        c.classList.toggle('on');
+      }
+    });
+  });
+}
+bindChips('voiceChips');
+bindChips('overlayChips');
+
+function selectedChip(containerId) {
+  return $(containerId).querySelector('.chip.on')?.dataset.voice || null;
+}
+function activeOverlays() {
+  return Array.from($('overlayChips').querySelectorAll('.chip.on')).map(c => c.dataset.overlay);
+}
+
+function autoOverlays(scenes) {
+  const overlays = {};
+  const snow_scenes = [];
+  const firefly_scenes = [];
+  const blossom_scenes = [];
+  const aurora_scenes = [];
+  const chapter_grades = {};
+
+  scenes.forEach((s, idx) => {
+    const i = idx + 1;
+    const t = s.toLowerCase();
+    if (/(snow|blizzard|storm|ice|frozen|frost|winter)/.test(t)) {
+      snow_scenes.push(i);
+      if (!chapter_grades[i] && Object.keys(chapter_grades).length === 0) chapter_grades[i] = "winter";
+    }
+    if (/(cave|fire|firefly|fireflies|warm|hearth|den|interior)/.test(t)) {
+      firefly_scenes.push(i);
+      if (!chapter_grades[i]) chapter_grades[i] = "cave";
+    }
+    if (/(blossom|petal|spring|flower|meadow|sunshine|bloom)/.test(t)) {
+      blossom_scenes.push(i);
+      if (!chapter_grades[i]) chapter_grades[i] = "spring";
+    }
+    if (/(aurora|dream|cosmic|stars|spirit|magical|nebula)/.test(t)) {
+      aurora_scenes.push(i);
+      if (!chapter_grades[i]) chapter_grades[i] = "cosmic";
+    }
+    if (/(dawn|sunrise|emerges|wakes)/.test(t) && !chapter_grades[i]) {
+      chapter_grades[i] = "dawn";
+    }
+  });
+
+  return {snow_scenes, firefly_scenes, blossom_scenes, aurora_scenes, chapter_grades};
+}
+
+$('forge').addEventListener('click', async () => {
+  const title = $('title').value.trim() || 'Untitled Story';
+  const slug = ($('slug').value.trim() || title.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-|-$/g, '');
+  const style = $('style').value;
+  const character = $('character').value.trim();
+  const sceneLines = sceneTextarea.value.split('\n').map(s => s.trim()).filter(Boolean);
+  const narrLines = narrationTextarea.value.split('\n').map(s => s.trim());
+
+  if (sceneLines.length < 2) {
+    statusEl.textContent = 'Need at least 2 scenes. Each line = one scene.';
+    return;
+  }
+
+  const scenes = sceneLines.map((line, i) => ({
+    still: `${style}, ${character ? character + ', ' : ''}${line}`,
+    motion: line,
+    narration: narrLines[i] || ""
+  }));
+
+  const voice = selectedChip('voiceChips') || 'warm_female_storyteller';
+  const onSet = new Set(activeOverlays());
+  const overlays = {
+    dust_all: onSet.has('dust_all'),
+    film_grain: onSet.has('film_grain'),
+    vignette: onSet.has('vignette'),
+    snow_scenes: [],
+    fireflies_scenes: [],
+    blossom_scenes: [],
+    aurora_scenes: [],
+    chapter_grades: {}
+  };
+
+  if (onSet.has('auto_particles') || onSet.has('auto_color')) {
+    const auto = autoOverlays(sceneLines);
+    if (onSet.has('auto_particles')) {
+      overlays.snow_scenes = auto.snow_scenes;
+      overlays.fireflies_scenes = auto.firefly_scenes;
+      overlays.blossom_scenes = auto.blossom_scenes;
+      overlays.aurora_scenes = auto.aurora_scenes;
+    }
+    if (onSet.has('auto_color')) overlays.chapter_grades = auto.chapter_grades;
+  }
+
+  const cfg = {
+    title, slug, style, character,
+    scenes,
+    voice,
+    overlays,
+    scene_duration: 8.5
+  };
+
+  statusEl.textContent = 'Starting render...';
+  $('forge').disabled = true;
+
+  try {
+    const res = await fetch('/api/story', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(cfg)
+    });
+    const data = await res.json();
+    if (data.error) {
+      statusEl.textContent = 'Error: ' + data.error;
+      $('forge').disabled = false;
+      return;
+    }
+    statusEl.innerHTML = `Render started. PID ${data.pid}. ~${Math.round(scenes.length * 11)} min. Output: <code>${data.output}</code>`;
+    pollStatus();
+  } catch (e) {
+    statusEl.textContent = 'Request failed: ' + e.message;
+    $('forge').disabled = false;
+  }
+});
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/short-status');
+    const s = await r.json();
+    if (s.phase === 'done') {
+      statusEl.textContent = `Done! Output: ${s.output}`;
+      $('forge').disabled = false;
+      return;
+    }
+    const cs = s.current_scene || {};
+    const total = (s.scenes || []).length;
+    const elapsed = cs.started_at ? Math.round(Date.now()/1000 - cs.started_at) : 0;
+    statusEl.textContent = `${s.phase} - scene ${cs.index || '?'}/${total} - ${elapsed}s on current scene`;
+  } catch (e) {}
+  setTimeout(pollStatus, 4000);
+}
+pollStatus();
+</script>
+</body>
+</html>
