@@ -545,19 +545,28 @@ def flash_attn_fwd(
     lib = _get_lib()
     kernel = lib.flash_attn_fwd_f16_d128
 
-    # Grid: total threads = n_q_blocks * bh * 128 (TG threads).
-    # group_size = 128. Threadgroups arranged as (n_q_blocks, bh).
-    # torch.mps.compile_shader's dispatch uses a flat thread count + group
-    # size; threadgroup_position_in_grid is derived from total/groupsize.
-    # We pass threads = n_q_blocks * bh * 128 and reconstruct tg_id.x/.y
-    # from a flat tg index. Since the kernel reads tg_id.x and tg_id.y, we
-    # must use the 3D grid form. PyTorch wrapper supports `threads` as a
-    # tuple of dim sizes (in threadgroups).
+    # Grid dispatch.
+    #
+    # IMPORTANT torch.mps semantics (verified empirically 2026-05-24):
+    # `threads=(X, Y, Z)` is the TOTAL thread count per dim, NOT the
+    # threadgroup count. `threadgroups_per_grid` = ceil(threads / group_size).
+    # So to launch (n_q_blocks, bh, 1) threadgroups with 128 threads each in
+    # the x dim, we must pass threads = (n_q_blocks * 128, bh * 1, 1 * 1).
+    #
+    # The previous code passed threads=(n_q_blocks, bh, 1), group_size=
+    # (128, 1, 1) — which launched only ceil(n_q_blocks/128) tgroups in x,
+    # leaving Q-rows beyond row 32 (or row 32*ceil(n_q_blocks/128)) totally
+    # uncomputed. The output for those rows was whatever `torch.empty_like`
+    # had in memory — at small S this happened to land on freshly-freed SDPA
+    # output buffers (looked correct), at larger S it landed on stale fp16
+    # data (looked like brown noise / 512.0 saturation). This is the bug
+    # that produced visually-garbage Wan renders despite the standalone
+    # kernel verifying at 137 dB on the small bench.
     try:
         kernel(
             q_c, k_c, v_c, out,
             int(S), float(scale),
-            threads=(n_q_blocks, bh, 1),
+            threads=(n_q_blocks * 128, bh, 1),
             group_size=(128, 1, 1),
         )
     except TypeError:

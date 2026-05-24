@@ -14,7 +14,7 @@
 
 Story Forge is a self-contained pipeline that takes a structured story description and produces a finished animated film — with motion, narration, original music, title and credits — entirely on local hardware. Five open-source models composed by `ffmpeg`. **Zero cloud calls. Zero API charges. Zero rate limits.** Run it once, run it a thousand times.
 
-> First public-confirmed LTX 13B distilled 0.9.8 working on Apple Silicon MPS — see [`metal/`](metal/) for the hand-written Metal flash-attention kernel that delivered a 12.32× speedup vs PyTorch SDPA.
+> First public-confirmed LTX 13B distilled 0.9.8 working on Apple Silicon MPS. We also tried a hand-written Metal flash-attention kernel for Wan — turned out PyTorch's MPS SDPA is already too well-tuned to beat at our shapes. The kernel is preserved in [`metal/`](metal/) as documented learning (see its README for what we tried, what we measured wrong, and what actually works for Wan speedup).
 
 ---
 

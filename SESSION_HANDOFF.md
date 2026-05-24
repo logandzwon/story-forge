@@ -78,6 +78,24 @@ Stack goal: drop a 4-min film render from 5 hours to ~10-30 min. Stacked savings
 | Mini-side Wan render CLI | `~/mini_wan_render.py` on mini | Pushed |
 | Wan distill v1 scaffold | `~/AI/distill/wan_distill_v1.py` on mini | Scaffolded (stubs for ComfyUI WanVideoWrapper integration) |
 
+### ⚠️ 2026-05-24 morning correction
+
+Last night's session ran ~13 hours and shipped a lot, but two celebrated "wins" were FALSE:
+
+1. **Metal flash-attention "12.32× speedup" was a measurement bug.** `torch.mps.compile_shader` dispatch parameters were misinterpreted — the kernel only computed 1/128th of the output rows. Unused rows received whatever was in freed memory from the previous SDPA call, which happened to contain the correct reference output (passing PSNR=137dB by pure coincidence). On real Wan renders the leftover memory was saturated fp16 garbage = brown noise frames. Bug fixed in `metal/flash_attn_mps.py`; kernel now produces correct output (PSNR 82+ dB at Wan shapes) but is **2-4× SLOWER than MPS SDPA** — vendor too tuned to beat. Code preserved as documented learning in `metal/README.md`. Metal kernel is OFF in production (`WAN_METAL_FUSED=0` default).
+
+2. **Wan 2-step distill training OOM'd on mini.** Estimated 40-44GB peak vs 64GB available was wrong — actual peak ~70GB, macOS hung overnight, mini force-rebooted at 10:49AM, Matt's 9AM morning briefing didn't run. Distill training is INCOMPLETE. Re-fire on M5 (128GB, fits cleanly) OR mini with Q4 GGUF weights (~25GB peak).
+
+### Machine utilization rules (do not repeat last night's mistakes)
+
+| Machine | RAM | Safe peak | Best uses |
+|---|---|---|---|
+| M5 Max | 128GB | ~90GB | Wan fp16 inference, distill training, LTX renders, Metal kernel dev (when revisited), heavy compute |
+| Mac mini M4 Pro | 64GB | ~45GB | Wan Q4 GGUF inference, Piper TTS, ACE-Step music, avatar-pipeline lipsync, status server, light services, morning briefing |
+| HQ VPS | small | small | dashboard, job queue, WP hosting |
+
+For any new long-running job, compute peak memory FIRST (model_GB × stages + activations + optimizer + 25% margin), pick machine, verify fits. See memory `feedback-machine-select-by-memory-budget.md`.
+
 ### ✅ Validated working as of 2026-05-24 night session
 
 1. **LTX 13B distilled 0.9.8 i2v on M5 MPS** — 118.6s per 5-sec clip (5.6× faster than Wan baseline). Uses Lightricks' OWN upstream code at `~/Desktop/PROJECTS/AI/videopipe/LTX-Video/`. Wrapper: `bin/make-ltx-lightricks`. Multi-scale recipe (7-step low-res first pass → spatial upscaler → 3-step high-res second pass). **Do NOT use diffusers** — `LTXImageToVideoPipeline.from_single_file()` is single-pass and physically cannot reproduce the multi-scale architecture, produces psychedelic noise every time. Confirmed across 5 retest attempts. Must set `prompt_enhancement_words_threshold: 0` in the derived YAML to disable Florence-2 prompt enhancer (transformers 5.9 broke it with `AttributeError: 'Florence2LanguageConfig' has no 'forced_bos_token_id'`). See `[[reference-ltx-lightricks-mps-recipe]]` memory.
