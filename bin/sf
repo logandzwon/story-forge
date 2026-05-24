@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""sf — Story Forge DSL CLI.
+
+Subcommands:
+  sf parse  FILE.sf [--out PATH]   parse + resolve + emit storyplan; print AST + plan
+  sf render FILE.sf [--dry]        full pipeline: parse → storyplan → render mp4
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# Ensure the story_forge package is importable when this CLI is run directly.
+REPO = Path("/Users/dtribe/Desktop/PROJECTS/AI/videopipe")
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from story_forge.parser import parse, ParseError       # noqa: E402
+from story_forge.resolver import resolve, ResolveError  # noqa: E402
+from story_forge.emitter import emit_storyplan, write_storyplan  # noqa: E402
+from story_forge import run as runner                  # noqa: E402
+
+
+def _compile(path: Path) -> tuple[list, dict, dict]:
+    try:
+        ast = parse(path)
+    except ParseError as e:
+        print(f"ParseError: {e}", file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        resolved = resolve(ast)
+    except ResolveError as e:
+        print(f"ResolveError: {e}", file=sys.stderr)
+        raise SystemExit(3)
+    plan = emit_storyplan(resolved)
+    return ast, resolved, plan
+
+
+def cmd_parse(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    ast, resolved, plan = _compile(path)
+
+    print("=== AST ===")
+    print(json.dumps(ast, indent=2, default=str))
+    print("\n=== STORYPLAN ===")
+    print(json.dumps(plan, indent=2, default=str))
+
+    if args.out:
+        out_path = write_storyplan(plan, Path(args.out))
+        print(f"\nwrote {out_path}", file=sys.stderr)
+    return 0
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    _ast, _resolved, plan = _compile(path)
+    plan_path = path.with_suffix(".storyplan.json")
+    write_storyplan(plan, plan_path)
+    print(f"wrote {plan_path}", file=sys.stderr)
+    if args.dry:
+        cfg = runner.storyplan_to_pipeline_config(plan)
+        print(json.dumps(cfg, indent=2, default=str))
+        return 0
+    result = runner.render(plan_path, dry_run=False)
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="sf",
+                                 description="Story Forge DSL CLI")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p_parse = sub.add_parser("parse", help="parse + emit storyplan")
+    p_parse.add_argument("file")
+    p_parse.add_argument("--out", help="write storyplan JSON to this path")
+    p_parse.set_defaults(func=cmd_parse)
+
+    p_render = sub.add_parser("render", help="parse + storyplan + render")
+    p_render.add_argument("file")
+    p_render.add_argument("--dry", action="store_true",
+                          help="print pipeline config but don't run renderer")
+    p_render.set_defaults(func=cmd_render)
+
+    args = ap.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

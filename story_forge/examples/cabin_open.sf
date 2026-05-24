@@ -1,0 +1,48 @@
+# cabin_open.sf — 3-scene Ghibli-style mini-film opening
+# A small child walks through snow to a warm cabin glowing with firelight.
+
+$style = "Studio Ghibli watercolor, soft snowfall, golden hour, painterly, 4k"
+$child = "a small child in a red hooded cloak, mittens, breath visible in cold air"
+$cabin = "a hand-built wooden cabin with warm yellow window light and smoke from the chimney"
+
+film "Cabin Open" slug=cabin_open target=m5+mini scene_dur=8.5
+
+voice warm: piper/en_US-libritts_r-medium speaker=0 length=1.18
+
+music wintry: ace/wintry-soft-piano vol=0.35
+
+@transition xfade dur=0.5
+@mix duck voice -> music threshold=-22 ratio=4
+
+scene snow_walk:
+    still flux:
+        prompt: "{$style}, wide shot of {$child} walking across a deep snowfield toward a distant glowing {$cabin}, pine forest framing the path"
+        seed: auto
+    motion wan:
+        prompt: "gentle handheld push-in, soft falling snow, child takes slow steps forward, breath plumes"
+        duration: 5.0
+    narrate warm:
+        line: "The snow came down like a hush, and the path home was longer than she remembered."
+    music wintry vol=0.30
+
+scene cabin_glow:
+    still flux:
+        prompt: "{$style}, medium shot of {$cabin} at dusk, frost on the windowpanes, lantern hanging by the door, footprints leading up to the porch"
+        seed: auto
+    motion wan:
+        prompt: "slow dolly toward the cabin door, warm light flickering through the windows, a few snowflakes drifting across the lens"
+        duration: 5.0
+    narrate warm:
+        line: "But the windows were lit, and somewhere inside, the kettle was already on."
+    music wintry vol=0.35
+
+scene fireside:
+    still flux:
+        prompt: "{$style}, interior of the cabin, {$child} unwrapping her cloak by a stone fireplace, soft amber firelight on her cheeks, kettle steaming on the hearth"
+        seed: auto
+    motion wan:
+        prompt: "intimate close shot, firelight flickers, child exhales and smiles, slow zoom to the dancing flames"
+        duration: 5.0
+    narrate warm:
+        line: "And the cold outside became a story she would only tell on warm nights."
+    music wintry vol=0.40
