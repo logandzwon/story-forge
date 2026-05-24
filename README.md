@@ -16,6 +16,22 @@ Story Forge is a self-contained pipeline that takes a structured story descripti
 
 > First public-confirmed LTX 13B distilled 0.9.8 working on Apple Silicon MPS — see [`metal/`](metal/) for the hand-written Metal flash-attention kernel that delivered a 12.32× speedup vs PyTorch SDPA.
 
+---
+
+## The manifesto
+
+We're not bound by what was taught. We don't accept upstream library defaults as the speed ceiling. We write our own software when the open-source one's wrong, we write our own DSL when JSON's too clumsy, we write our own Metal kernels when the vendor's path is slow.
+
+Cloud companies will tell you AI cinema needs a server farm. It doesn't. It needs a laptop, a script, and somebody willing to read the source.
+
+What the cloud charges $300-$1000 per film for, this pipeline does for the price of electricity. What people paid big data centers to run, we proved runs on a MacBook Pro on a kitchen table. Three of tonight's pieces are public firsts:
+
+1. LTX 13B distilled 0.9.8 working on Apple Silicon MPS
+2. LPIPS-gated speedup harness for Mac video diffusion (CI-style regression gates on render quality)
+3. Custom Metal flash-attention kernel for Wan video DiT — 12.32× over the vendor path
+
+We make our own rules. We build new things constantly. We make possible what people said wasn't possible. That's the whole point.
+
 ### ▶ Watch the first Story Forge film — *The Bear Sister*
 
 [![The Bear Sister — a Story Forge production](./hero-screenshot.jpg)](https://youtu.be/_bFQTl7_vF4)
