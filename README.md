@@ -14,7 +14,11 @@
 
 Story Forge is a self-contained pipeline that takes a structured story description and produces a finished animated film — with motion, narration, original music, title and credits — entirely on local hardware. Five open-source models composed by `ffmpeg`. **Zero cloud calls. Zero API charges. Zero rate limits.** Run it once, run it a thousand times.
 
-![still from "The Bear Sister", the first Story Forge film](./hero-screenshot.jpg)
+### ▶ Watch the first Story Forge film — *The Bear Sister*
+
+[![The Bear Sister — a Story Forge production](./hero-screenshot.jpg)](https://youtu.be/_bFQTl7_vF4)
+
+[**▶ Watch on YouTube**](https://youtu.be/_bFQTl7_vF4) · [Download `saga.mp4`](./saga.mp4) · [Read the story (STORYBOOK.md)](./STORYBOOK.md)
 
 ---
 
@@ -46,7 +50,7 @@ To prove the pipeline, the first thing through it is a **two-act, 4:08 animated 
 | **Hardware** | One MacBook Pro · Apple M5 Max · 128 GB unified memory |
 | **Cloud calls** | **0** |
 
-[Watch `saga.mp4`](./saga.mp4) · [Read the full story (STORYBOOK.md)](./STORYBOOK.md)
+[▶ Watch on YouTube](https://youtu.be/_bFQTl7_vF4) · [Download `saga.mp4`](./saga.mp4) · [Read the full story (STORYBOOK.md)](./STORYBOOK.md)
 
 ---
 
