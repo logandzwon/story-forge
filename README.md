@@ -289,6 +289,29 @@ The whole thing is the point. A 4-minute animated film with custom score and syn
 
 The cloud companies will tell you this needs a server farm. It doesn't. It needs a MacBook Pro and a script.
 
+### What the cloud would actually cost
+
+A film like *The Bear Sister* (4 minutes, 51 distinct Wan i2v clips) on cloud-equivalent services:
+
+| Service | $ per 5-sec clip | 1-min film (~12 clips) | 4-min film (~51 clips) | 10-min film (~120 clips) |
+|---|---|---|---|---|
+| **OpenAI Sora** | $2.50 | $30 | $128 | $300 |
+| **Runway Gen-3** | $4.00 | $48 | $204 | $480 |
+| **Pika 2.0** | $2.00–$3.00 | $24–36 | $102–153 | $240–360 |
+| **Luma Dream Machine** | $2.50 | $30 | $128 | $300 |
+| **Kling AI** | $1.75 | $21 | $89 | $210 |
+| **fal.ai LTX** *(cheapest cloud)* | $0.10 | $1.20 | $5.10 | $12 |
+| **Story Forge (your machine)** | **$0.00** | **$0** | **$0** | **$0** |
+
+Plus the cloud services charge **monthly subscriptions just to access**:
+- Runway Pro: $35/mo
+- Pika Pro: $35/mo
+- Sora: ChatGPT Plus $20/mo minimum
+
+A single 51-clip film with 5× iteration cycles during development = ~$640 on Sora. Story Forge does it for the cost of electricity ($0.20).
+
+Hardware amortization: an M5 Max MacBook Pro + Mac mini M4 Pro (~$4,900 one-time) breaks even against Sora pricing at **~40 films**. After that, every render is pure profit — and you keep the hardware for everything else you do.
+
 ---
 
 ## Credits — first film
