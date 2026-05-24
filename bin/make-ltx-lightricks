@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""make-ltx-lightricks — i2v render via Lightricks' OWN reference inference.
+
+Bypasses diffusers.LTXImageToVideoPipeline entirely. After 5 attempts via
+`LTXImageToVideoPipeline.from_single_file()` produced psychedelic noise on
+M5 Max, we drive Lightricks' upstream `ltx_video.inference.infer()` directly
+from the cloned repo at ../LTX-Video/.
+
+Why this should work where diffusers didn't:
+  - Their pipeline reads the scheduler config from the safetensors metadata
+    (RectifiedFlowScheduler.from_pretrained(ckpt_path)), so the shifted-
+    dynamic-schedule that the distilled checkpoint was trained on is loaded
+    automatically — no scheduler hand-patching.
+  - Their config (configs/ltxv-13b-0.9.8-distilled.yaml) declares
+    pipeline_type: multi-scale → it runs first_pass (7 timesteps), upsamples
+    latents via the spatial-upscaler model, then runs second_pass (3 timesteps).
+    diffusers' LTXImageToVideoPipeline is single-pass only and CANNOT replicate
+    this — that's likely the noise source.
+  - The repo's get_device() already returns "mps" on Apple Silicon (line 54
+    of ltx_video/inference.py). README confirms MPS support tested on PyTorch
+    2.3 / 2.6+ (we have 2.12 in ComfyUI venv).
+
+CLI mirrors make-ltx-video so render-route can swap drop-in:
+  make-ltx-lightricks --i2v INPUT.png --duration 5.0 --res 768x512 \\
+                      --label scene_01 "motion prompt"
+
+Output: ~/AI/videopipe/outputs/<label>_ltxL_<timestamp>.mp4
+"""
+import argparse
+import os
+import shutil
+import sys
+import time
+from pathlib import Path
+
+# --- Wire Lightricks' module into sys.path ----------------------------------
+LIGHTRICKS_REPO = Path(__file__).resolve().parent.parent / "LTX-Video"
+if not (LIGHTRICKS_REPO / "ltx_video" / "inference.py").exists():
+    sys.exit(f"[ltxL] Lightricks repo not found at {LIGHTRICKS_REPO}. "
+             f"Clone with: git clone https://github.com/Lightricks/LTX-Video.git "
+             f"{LIGHTRICKS_REPO}")
+sys.path.insert(0, str(LIGHTRICKS_REPO))
+
+# --- Local model paths (no HF downloads for the big checkpoint) -------------
+LOCAL_TRANSFORMER = (
+    Path.home()
+    / "AI/ComfyUI/models/diffusion_models/ltx/ltxv-13b-0.9.8-distilled.safetensors"
+)
+# Spatial upscaler is REQUIRED by the multi-scale pipeline (~400MB). If we
+# don't have it locally, Lightricks' infer() will hf_hub_download it on first
+# run. Cache it next to the transformer for future offline use.
+LOCAL_UPSCALER_DIR = LOCAL_TRANSFORMER.parent
+LOCAL_UPSCALER = LOCAL_UPSCALER_DIR / "ltxv-spatial-upscaler-0.9.8.safetensors"
+CONFIG_NAME = "configs/ltxv-13b-0.9.8-distilled.yaml"
+
+
+def get_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("prompt", help="motion prompt")
+    p.add_argument("--i2v", required=True, help="input still PNG/JPEG (first frame)")
+    p.add_argument("--duration", type=float, default=5.0)
+    p.add_argument("--res", default="768x512", help="WIDTHxHEIGHT, rounded to /32")
+    p.add_argument("--label", default="ltx")
+    p.add_argument("--fps", type=int, default=24)
+    p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--negative-prompt", default=(
+        "worst quality, inconsistent motion, blurry, jittery, distorted, "
+        "low quality, ugly, deformed"))
+    p.add_argument("--cond-strength", type=float, default=1.0,
+                   help="how strongly the input still anchors frame 0 (0..1)")
+    p.add_argument("--out-dir", default=str(Path.home() / "AI/videopipe/outputs"))
+    p.add_argument("--keep-lightricks-output", action="store_true",
+                   help="leave the file in LTX-Video/outputs/ in addition to copying it")
+    return p.parse_args()
+
+
+def main():
+    args = get_args()
+
+    if not LOCAL_TRANSFORMER.exists():
+        sys.exit(f"[ltxL] transformer not found at {LOCAL_TRANSFORMER}")
+
+    width, height = (int(x) for x in args.res.split("x"))
+    num_frames = max(9, int(args.duration * args.fps))
+
+    # Lightricks pads internally to /32 and (N*8+1); we still pass clean values.
+    width = max(256, (width // 32) * 32)
+    height = max(256, (height // 32) * 32)
+    num_frames = ((num_frames - 2) // 8 + 1) * 8 + 1  # 121-style
+
+    seed = args.seed if args.seed is not None else int(time.time()) & 0xFFFFFFFF
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = int(time.time())
+    final_out = out_dir / f"{args.label}_ltxL_{ts:08d}.mp4"
+
+    # Lightricks' infer() writes into <output_path>/video_output_*_seed_HxWxF_i.mp4
+    # Point it at a fresh staging dir, then move the result to our naming.
+    staging = out_dir / f".{args.label}_ltxL_{ts:08d}_staging"
+    staging.mkdir(parents=True, exist_ok=True)
+
+    # --- Build InferenceConfig and call infer() -----------------------------
+    print(f"[ltxL] importing Lightricks inference module...")
+    t0 = time.time()
+    # Import AFTER sys.path.insert above
+    from ltx_video.inference import infer, InferenceConfig, load_pipeline_config
+
+    # Load YAML, then override checkpoint paths to local files so HF doesn't
+    # re-download the 28GB safetensors.
+    pipeline_config_path = LIGHTRICKS_REPO / CONFIG_NAME
+    cfg_dict = load_pipeline_config(str(pipeline_config_path))
+    # Print the resolved config so any future divergence is loud.
+    print(f"[ltxL] pipeline_type={cfg_dict.get('pipeline_type')} "
+          f"sampler={cfg_dict.get('sampler')} precision={cfg_dict.get('precision')}")
+    print(f"[ltxL] first_pass timesteps={cfg_dict['first_pass']['timesteps']}")
+    print(f"[ltxL] second_pass timesteps={cfg_dict['second_pass']['timesteps']}")
+
+    # Inject local checkpoint paths by writing a derived YAML in staging.
+    import yaml
+    cfg_dict["checkpoint_path"] = str(LOCAL_TRANSFORMER)
+    # Disable prompt-enhancement: auto-triggers for short prompts (< threshold
+    # words, default 120) and tries to load Florence-2, which transformers 5.9
+    # broke. Setting threshold to 0 makes the auto-trigger always-false.
+    cfg_dict["prompt_enhancement_words_threshold"] = 0
+    if LOCAL_UPSCALER.exists():
+        cfg_dict["spatial_upscaler_model_path"] = str(LOCAL_UPSCALER)
+        print(f"[ltxL] using local spatial upscaler: {LOCAL_UPSCALER}")
+    else:
+        # Leave as-is — infer() will hf_hub_download() to ~/.cache/huggingface
+        print(f"[ltxL] spatial upscaler not cached locally; will hf-download "
+              f"~400MB on first run to ~/.cache/huggingface")
+
+    derived_cfg = staging / "pipeline_config.yaml"
+    with derived_cfg.open("w") as f:
+        yaml.safe_dump(cfg_dict, f)
+
+    config = InferenceConfig(
+        prompt=args.prompt,
+        output_path=str(staging),
+        pipeline_config=str(derived_cfg),
+        seed=seed,
+        height=height,
+        width=width,
+        num_frames=num_frames,
+        frame_rate=args.fps,
+        negative_prompt=args.negative_prompt,
+        # The input still becomes a conditioning item anchored at frame 0.
+        conditioning_media_paths=[args.i2v],
+        conditioning_strengths=[args.cond_strength],
+        conditioning_start_frames=[0],
+    )
+
+    print(f"[ltxL] seed={seed} frames={num_frames} {width}x{height} "
+          f"steps={len(cfg_dict['first_pass']['timesteps'])}+"
+          f"{len(cfg_dict['second_pass']['timesteps'])} (multi-scale)")
+    print(f"[ltxL] calling Lightricks infer()...")
+    t1 = time.time()
+    try:
+        infer(config=config)
+    except Exception as e:
+        print(f"[ltxL] infer() raised: {type(e).__name__}: {e}")
+        raise
+    print(f"[ltxL] infer() returned in {time.time()-t1:.1f}s "
+          f"(total {time.time()-t0:.1f}s)")
+
+    # Find produced mp4 in the date-stamped subfolder Lightricks creates.
+    candidates = sorted(staging.rglob("video_output_*.mp4"), key=os.path.getmtime)
+    if not candidates:
+        sys.exit(f"[ltxL] no video_output_*.mp4 found under {staging}")
+    produced = candidates[-1]
+    shutil.copy2(produced, final_out)
+    print(f"[ltxL] done -> {final_out}")
+
+    if not args.keep_lightricks_output:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

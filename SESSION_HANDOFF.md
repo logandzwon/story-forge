@@ -78,27 +78,40 @@ Stack goal: drop a 4-min film render from 5 hours to ~10-30 min. Stacked savings
 | Mini-side Wan render CLI | `~/mini_wan_render.py` on mini | Pushed |
 | Wan distill v1 scaffold | `~/AI/distill/wan_distill_v1.py` on mini | Scaffolded (stubs for ComfyUI WanVideoWrapper integration) |
 
-### ❌ NOT working yet — open problems
+### ✅ Validated working as of 2026-05-24 night session
 
-1. **LTX-Video standalone render fails:** `make-ltx-video` errors with `SingleFileComponentError: Failed to load T5EncoderModel`. The distilled single-file checkpoint doesn't include the T5 text encoder weights. Fix: load text encoder separately via `T5EncoderModel.from_pretrained("Lightricks/LTX-Video")` and pass to the pipeline, OR use `LTXImageToVideoPipeline.from_pretrained()` with the full HF repo (will redownload).
+1. **LTX 13B distilled 0.9.8 i2v on M5 MPS** — 118.6s per 5-sec clip (5.6× faster than Wan baseline). Uses Lightricks' OWN upstream code at `~/Desktop/PROJECTS/AI/videopipe/LTX-Video/`. Wrapper: `bin/make-ltx-lightricks`. Multi-scale recipe (7-step low-res first pass → spatial upscaler → 3-step high-res second pass). **Do NOT use diffusers** — `LTXImageToVideoPipeline.from_single_file()` is single-pass and physically cannot reproduce the multi-scale architecture, produces psychedelic noise every time. Confirmed across 5 retest attempts. Must set `prompt_enhancement_words_threshold: 0` in the derived YAML to disable Florence-2 prompt enhancer (transformers 5.9 broke it with `AttributeError: 'Florence2LanguageConfig' has no 'forced_bos_token_id'`). See `[[reference-ltx-lightricks-mps-recipe]]` memory.
 
-2. **Mini Wan inference — workflow JSON rejected (HTTP 400):** Test job `e94c64efc006` failed with `urllib.error.HTTPError: HTTP Error 400: Bad Request` when posting workflow to mini's ComfyUI `/prompt` endpoint. Mini's ComfyUI is up + accepting requests, just rejecting our specific workflow JSON. Debug path: (a) `mini "~/AI/ComfyUI/venv/bin/python -c 'import json,urllib.request; print(urllib.request.urlopen(\"http://localhost:8188/object_info\").read()[:2000])'"` to see what node classes mini actually has, then (b) compare against the workflow in `mini_wan_render.py` lines ~55-130. Likely culprits: node class name mismatches (`WanImageToVideo` may be `WanVideo_I2V` or similar), or missing custom node for the GGUF unet loader (we used FP16 path on mini, not GGUF — workflow may need updating to `UNETLoader` with `weight_dtype="fp16"`).
+2. **Measurement harness** at `bin/measure-render` — `baseline <name> -- <cmd>` and `compare <name> -- <cmd>` subcommands. Per-frame LPIPS via the `lpips` pypi pkg, ffprobe metadata, gates default to mean<0.05 / p95<0.10 / speedup>1.10. Use for every multiplier before integrating.
 
-3. **Wan distill training scaffold has TODO stubs:** `wan_distill_v1.py` model loader and teacher/student inference are explicit TODOs. The genuinely hard part is importing ComfyUI's `WanVideoWrapper` code as a Python module (not just via ComfyUI's web queue) to expose Wan's UNet for PEFT LoRA training. Estimated: 1-2 days of focused dev.
+3. **mini ComfyUI :8189** — runs the `~/AI/ComfyUI/` install (newer ComfyUI v0.22 with `Wan22ImageToVideoLatent` + correct mask handling for the 36-channel patch_embedding). Spawn from Mac mini Terminal (FIA) via `nohup ~/AI/ComfyUI/venv/bin/python ~/AI/ComfyUI/main.py --listen 127.0.0.1 --port 8189 < /dev/null > /tmp/comfy8189.log 2>&1 & disown`. LaunchAgent plist staged at `/tmp/com.matt.comfyui-8189.plist` for `launchctl bootstrap` install.
 
-4. **Metal kernels blocked on Xcode app install:** CLI tools alone don't include the `metal` compiler. Matt needs to manually install full Xcode from the App Store (~7 GB). Until then, attention-block Metal kernels can't be compiled.
+4. **Custom nodes cloned on mini** (no ComfyUI restart yet): `~/AI/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper` (kijai — MagCache/TeaCache/EasyCache nodes) and `~/AI/ComfyUI/custom_nodes/ComfyUI-GGUF` (city96 — `UnetLoaderGGUF` for Q4_K_M Wan weights). Will activate on next ComfyUI :8189 restart.
 
-5. **Story Forge UI extensions never built:** multi-voice routing, SFX library, fast-mode toggle per scene, lip-sync (Wav2Lip) integration. All planned, none implemented. UI is still single-voice + procedural overlays only.
+5. **Q4_K_M Wan weights cached on mini** at `~/AI/ComfyUI/models/unet/Wan2.2-I2V-A14B-{HighNoise,LowNoise}-Q4_K_M.gguf` (9.65GB each, from QuantStack). Replaces the 28GB fp16 files we currently use. ~4× memory drop, faster load.
 
-### Roadmap (in priority order)
+### Open problems
 
-1. **Validate mini Wan inference** (highest impact / lowest risk — if it works, parallel rendering halves all future renders with zero code change)
-2. **Fix LTX standalone CLI** (T5 encoder loading) — once fixed, B-roll renders drop from 11 min to ~30 sec
-3. **Build mini-aware story_pipeline.py routing** — alternating scenes across M5 + mini
-4. **Wan distill training** — multi-day project; the genuine 4× perpetual speedup
-5. **Story Forge UI extensions** (multi-voice + SFX + fast-mode toggle)
-6. **Wav2Lip integration** for dialogue scenes (requires character voice clones + face still)
-7. **Metal kernels** (when Xcode app installed)
+1. **Wan fp16 dual-stage on mini takes >50 min per clip.** 14B × 2 stages = 56GB fp16 weights on a 64GB M2 Pro hits memory pressure hard. Q4_K_M (just downloaded, not yet validated) should fix this — both stages fit in ~20GB. Test pending ComfyUI restart.
+
+2. **MPS does NOT support FP8_E4M3FN dtype.** Wan 2.2 fp8_scaled checkpoint files load but immediately RuntimeError on first sampler step. Stick with fp16 or GGUF Q4. Apple may add FP8 support later.
+
+3. **Wan attention bench OOMs.** `bin/bench-wan-attention` loads all models simultaneously and overruns M5's 180GB MPS watermark. Needs sequential-load fix (unload TE before sampler runs, etc.) before we can get the Metal-kernel ROI numbers. Phase 0 effort: ~1 hour.
+
+4. **Story Forge UI extensions never built:** multi-voice routing, SFX library, fast-mode toggle per scene, Wav2Lip lip-sync. All planned, none implemented.
+
+### Roadmap (in priority order, updated 2026-05-24)
+
+1. **Wan Q4_K_M validation** (next, ~15 min) — Restart mini ComfyUI, write Q4 workflow JSON variant (swap `UNETLoader` → `UnetLoaderGGUF`), test 5-sec render. Expected speedup ~2× from faster load alone.
+2. **MagCache/TeaCache layer** (~30 min) — Add `WanVideoTeaCache` node to Q4 workflow on both high-noise and low-noise branches, sweep threshold via measurement harness. Expected ~1.1-1.3× more.
+3. **Wan baseline + harness comparison run** (~15 min) — Record fp16 (or Q4 if fp16 won't finish) as baseline; compare Q4+MagCache. First real LPIPS numbers.
+4. **`render-route` integration of `make-ltx-lightricks`** — Replace broken `make-ltx-video` with `make-ltx-lightricks` so B-roll scenes auto-route to working LTX.
+5. **Phase 0 attention bench rewrite** — Sequential model load so it doesn't OOM. Then we have hard numbers to gate the Metal kernel work.
+6. **Phase 1 Metal kernel** (Xcode + Metal compiler are installed) — Start with fused RMSNorm+Linear (safer than fused QKV+RoPE first try). PyTorch `torch.mps.compile_shader` + custom op + env-var gate.
+7. **Story Forge DSL MVP** — Indentation-based blocks, `.sf` → `.storyplan.json` IR → ComfyUI workflow + ffmpeg plan.
+8. **Wan distill training** — 1-2 day project, the genuine perpetual 2× via 2-step student.
+9. **Story Forge UI extensions** (multi-voice + SFX + fast-mode toggle).
+10. **Wav2Lip integration** for dialogue scenes.
 
 ---
 

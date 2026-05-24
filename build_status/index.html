@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Story Forge — Speedup Build Status</title>
+<meta http-equiv="refresh" content="20">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --card: #131826;
+    --card2: #1a2033;
+    --border: #2a3450;
+    --text: #e8ecf4;
+    --muted: #8893ab;
+    --done: #34d399;
+    --inprog: #fbbf24;
+    --pending: #6b7691;
+    --error: #f87171;
+    --accent: #60a5fa;
+    --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    background: var(--bg); color: var(--text); padding: 24px;
+    max-width: 1400px; margin: 0 auto;
+  }
+  h1 { font-size: 26px; margin-bottom: 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 12px; }
+
+  /* Pipeline diagram */
+  .pipe { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .pipe .node {
+    background: var(--card2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 18px; text-align: center; min-width: 140px;
+  }
+  .pipe .node .name { font-weight: 600; color: var(--accent); }
+  .pipe .node .role { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .pipe .arrow {
+    color: var(--purple); font-size: 22px; margin: 0 8px;
+  }
+
+  /* Vision */
+  .vision .headline {
+    color: var(--accent); font-size: 16px; font-weight: 600; line-height: 1.4;
+  }
+  .vision .vs {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;
+  }
+  .vision .vs > div { padding: 10px 12px; background: var(--card2); border-radius: 8px; }
+  .vision .label { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .vision .baseline { color: var(--error); font-weight: 600; }
+  .vision .target { color: var(--done); font-weight: 600; }
+
+  /* Phases */
+  .phases-section { grid-column: 1 / -1; }
+  .phase {
+    display: grid; grid-template-columns: 32px 1fr 120px;
+    align-items: center; gap: 14px; padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .phase:last-child { border-bottom: none; }
+  .phase .badge {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: bold; font-size: 14px;
+  }
+  .phase[data-status="done"] .badge { background: var(--done); color: #052e1a; }
+  .phase[data-status="in_progress"] .badge { background: var(--inprog); color: #422006; }
+  .phase[data-status="pending"] .badge { background: var(--card2); color: var(--pending); }
+  .phase[data-status="error"] .badge { background: var(--error); color: #2d0707; }
+  .phase .title { font-weight: 600; }
+  .phase .detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .phase .meta {
+    text-align: right; font-size: 12px; color: var(--muted);
+  }
+  .phase[data-status="done"] .meta { color: var(--done); }
+  .phase[data-status="in_progress"] .meta { color: var(--inprog); }
+
+  /* Novelty */
+  .novelty ul { list-style: none; padding-left: 0; }
+  .novelty li {
+    padding: 8px 12px; border-radius: 6px; margin-bottom: 6px;
+    background: var(--card2); font-size: 13px;
+  }
+  .novelty .first { border-left: 3px solid var(--purple); }
+  .novelty .rare { border-left: 3px solid var(--accent); }
+
+  .updated {
+    color: var(--muted); font-size: 11px; text-align: right; margin-top: 16px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Story Forge — Speedup Build</h1>
+<p class="sub" id="sub">loading…</p>
+
+<div class="grid">
+  <div class="card vision">
+    <h2>Final Vision</h2>
+    <div class="headline" id="vision-headline">—</div>
+    <div class="vs">
+      <div>
+        <div class="label">Today</div>
+        <div class="baseline" id="vision-today">—</div>
+      </div>
+      <div>
+        <div class="label">Target</div>
+        <div class="target" id="vision-target">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Hardware Pipeline</h2>
+    <div class="pipe" id="pipeline">—</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card novelty">
+    <h2>First-in-world</h2>
+    <ul id="first-in-world">—</ul>
+  </div>
+  <div class="card novelty">
+    <h2>Rare</h2>
+    <ul id="rare">—</ul>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Right Now</h2>
+    <div id="rn-running"></div>
+    <div id="rn-idle"></div>
+    <div id="rn-next"></div>
+  </div>
+  <div class="card">
+    <h2>Tonight So Far</h2>
+    <div id="ts-hours"></div>
+    <div id="ts-wins"></div>
+    <div id="ts-dead"></div>
+  </div>
+</div>
+
+<div class="card phases-section">
+  <h2>Build Phases</h2>
+  <div id="phases">—</div>
+</div>
+
+<p class="updated" id="updated">—</p>
+
+<script>
+fetch("status.json?_=" + Date.now())
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById("sub").textContent =
+      `Started ${new Date(data.session_started).toLocaleString()}`;
+    document.getElementById("updated").textContent =
+      `auto-refreshes every 20s · status.json updated ${new Date(data.updated_at).toLocaleString()}`;
+
+    // pipeline
+    const pipe = document.getElementById("pipeline");
+    pipe.innerHTML = "";
+    data.pipeline_diagram.nodes.forEach((n, i) => {
+      const node = document.createElement("div");
+      node.className = "node";
+      node.innerHTML = `<div class="name">${n.label}</div>
+                        <div class="role">${n.ram || ""}<br>${n.role}</div>`;
+      pipe.appendChild(node);
+      if (i < data.pipeline_diagram.nodes.length - 1) {
+        const arrow = document.createElement("div");
+        arrow.className = "arrow"; arrow.textContent = "⟷";
+        pipe.appendChild(arrow);
+      }
+    });
+
+    // vision
+    document.getElementById("vision-headline").textContent = data.final_vision.headline;
+    document.getElementById("vision-today").textContent = data.final_vision.today_baseline;
+    document.getElementById("vision-target").textContent = data.final_vision.target;
+
+    // novelty
+    const first = document.getElementById("first-in-world");
+    first.innerHTML = "";
+    data.novelty.first_in_world.forEach(t => {
+      const li = document.createElement("li"); li.className = "first"; li.textContent = t;
+      first.appendChild(li);
+    });
+    const rare = document.getElementById("rare");
+    rare.innerHTML = "";
+    data.novelty.rare.forEach(t => {
+      const li = document.createElement("li"); li.className = "rare"; li.textContent = t;
+      rare.appendChild(li);
+    });
+
+    // right now
+    if (data.right_now) {
+      const rn = data.right_now;
+      document.getElementById("rn-running").innerHTML =
+        `<div style="margin-bottom:8px"><div class="label" style="color: var(--inprog); font-size:11px; text-transform:uppercase">Active</div>` +
+        rn.actively_running.map(t => `<div style="background:rgba(251,191,36,0.1); padding:6px 10px; border-radius:6px; margin-top:4px;">⏳ ${t}</div>`).join("") +
+        `</div>`;
+      document.getElementById("rn-idle").innerHTML =
+        `<div style="margin-bottom:8px"><div class="label" style="color: var(--muted); font-size:11px; text-transform:uppercase">Idle</div>` +
+        rn.idle_waiting.map(t => `<div style="color:var(--muted); padding:4px 0;">○ ${t}</div>`).join("") +
+        `</div>`;
+      document.getElementById("rn-next").innerHTML =
+        `<div class="label" style="color: var(--accent); font-size:11px; text-transform:uppercase">Next Decision</div>
+         <div style="background:rgba(96,165,250,0.1); padding:8px 10px; border-radius:6px; margin-top:4px;">${rn.next_decision}</div>`;
+    }
+
+    // tonight summary
+    if (data.tonight_summary) {
+      const ts = data.tonight_summary;
+      document.getElementById("ts-hours").innerHTML =
+        `<div style="font-size:28px; font-weight:bold; color:var(--accent); margin-bottom:8px">${ts.hours_invested}h invested</div>`;
+      document.getElementById("ts-wins").innerHTML =
+        `<div class="label" style="color: var(--done); font-size:11px; text-transform:uppercase">Wins</div>` +
+        `<ul style="list-style:none; padding:0; margin:6px 0 12px 0; font-size:12px;">` +
+        ts.wins.map(w => `<li style="padding:3px 0; color:var(--text);">✓ ${w}</li>`).join("") +
+        `</ul>`;
+      document.getElementById("ts-dead").innerHTML =
+        `<div class="label" style="color: var(--error); font-size:11px; text-transform:uppercase">Dead Ends Killed</div>` +
+        `<ul style="list-style:none; padding:0; margin:6px 0 0 0; font-size:12px;">` +
+        ts.dead_ends_killed.map(w => `<li style="padding:3px 0; color:var(--muted);">✗ ${w}</li>`).join("") +
+        `</ul>`;
+    }
+
+    // phases
+    const phases = document.getElementById("phases");
+    phases.innerHTML = "";
+    data.phases.forEach(p => {
+      const div = document.createElement("div");
+      div.className = "phase"; div.dataset.status = p.status;
+      const badgeChar = {done: "✓", in_progress: "·", pending: "○", error: "✗"}[p.status] || "?";
+      const metaText = p.status === "done" ? (p.time_taken || "done") :
+                       p.status === "in_progress" ? (p.eta || "running") :
+                       (p.eta || "soon");
+      div.innerHTML = `
+        <div class="badge">${badgeChar}</div>
+        <div>
+          <div class="title">${p.title}</div>
+          <div class="detail">${p.detail || ""}</div>
+        </div>
+        <div class="meta">${metaText}</div>`;
+      phases.appendChild(div);
+    });
+  })
+  .catch(e => {
+    document.body.innerHTML += `<p style="color: var(--error)">Failed to load status.json: ${e.message}</p>`;
+  });
+</script>
+
+</body>
+</html>

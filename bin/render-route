@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""render-route — picks the right i2v engine per scene.
+
+Selection logic:
+  - If --engine specified explicitly: use that
+  - Else if scene is "hero" (has character action / faces / dialogue): Wan
+  - Else if scene is "broll" (ambient, atmosphere): LTX-Video
+  - Else: Wan (default safe)
+
+Usage:
+  render-route --still S.png --duration 5 --label scene --engine [wan|ltx|auto] "motion prompt"
+  render-route --still S.png --tag hero|broll  --label scene "motion prompt"
+
+Auto routing keywords (cheap heuristic):
+  hero       → face/talk/walks/lifts/swings/jumps/picks up/grabs
+  broll      → wind/snow/water/light/dust/atmosphere/distant/wide
+"""
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+BIN_DIR = Path(__file__).resolve().parent
+WAN_BIN = BIN_DIR / "make-video"
+# make-ltx-lightricks = the WORKING LTX path (Lightricks' upstream multi-scale).
+# The old make-ltx-video uses diffusers single-pass which can't reproduce the
+# 0.9.8 distilled multi-scale recipe and produces psychedelic noise.
+LTX_BIN = BIN_DIR / "make-ltx-lightricks"
+
+HERO_KEYWORDS = {"face", "talk", "talks", "talking", "walks", "lifts", "swings",
+                 "jumps", "picks up", "grabs", "throws", "hits", "catches",
+                 "smiles", "blinks", "looks at", "reaches"}
+
+BROLL_KEYWORDS = {"wind", "snow", "water", "light", "dust", "atmosphere",
+                  "distant", "wide", "establishing", "trees sway", "leaves drift",
+                  "clouds move", "fog", "mist", "rain", "particles"}
+
+
+def classify(prompt: str) -> str:
+    p = prompt.lower()
+    hero = sum(1 for k in HERO_KEYWORDS if k in p)
+    broll = sum(1 for k in BROLL_KEYWORDS if k in p)
+    if broll > hero:
+        return "ltx"
+    return "wan"  # safe default
+
+
+def get_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("prompt", help="motion prompt")
+    p.add_argument("--still", required=True, help="input still PNG")
+    p.add_argument("--duration", type=float, default=5.0)
+    p.add_argument("--res", default=None, help="defaults: wan=832x480, ltx=768x512")
+    p.add_argument("--label", default="scene")
+    p.add_argument("--engine", choices=["wan", "ltx", "auto"], default="auto")
+    p.add_argument("--tag", choices=["hero", "broll", "auto"], default="auto",
+                   help="route hint: hero=Wan, broll=LTX")
+    return p.parse_args()
+
+
+def main():
+    args = get_args()
+
+    engine = args.engine
+    if engine == "auto":
+        if args.tag == "hero":
+            engine = "wan"
+        elif args.tag == "broll":
+            engine = "ltx"
+        else:
+            engine = classify(args.prompt)
+
+    print(f"[route] engine: {engine}  (tag={args.tag})")
+
+    if engine == "wan":
+        res = args.res or "832x480"
+        cmd = [
+            "python3", str(WAN_BIN),
+            "--gguf", "--i2v", args.still,
+            "--duration", str(args.duration),
+            "--res", res,
+            "--label", args.label,
+            args.prompt,
+        ]
+    else:  # ltx — Lightricks' own upstream code, multi-scale on MPS
+        res = args.res or "768x512"
+        # make-ltx-lightricks needs the venv that has its deps installed
+        ltx_py = Path.home() / "AI/ComfyUI/venv/bin/python"
+        cmd = [
+            str(ltx_py), str(LTX_BIN),
+            "--i2v", args.still,
+            "--duration", str(args.duration),
+            "--res", res,
+            "--label", args.label,
+            args.prompt,
+        ]
+
+    return subprocess.run(cmd).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

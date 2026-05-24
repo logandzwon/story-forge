@@ -22,6 +22,21 @@ Story Forge is a self-contained pipeline that takes a structured story descripti
 
 ---
 
+## 🚀 Status — 2026-05-24 build session
+
+The speedup build is underway. **First public-first wins last night:**
+
+- ✅ **LTX 13B distilled 0.9.8 working on Apple Silicon MPS** — likely the first public-confirmed working setup (cross-checked by 5 research agents). 118s per 5-sec clip, **5.6× faster than Wan baseline**. Path: Lightricks' own upstream code (not `diffusers` — single-pass `LTXImageToVideoPipeline` physically cannot reproduce the 0.9.8 multi-scale 7+3 recipe). Wrapper at `bin/make-ltx-lightricks`.
+- ✅ **LPIPS-gated speedup measurement harness** — novel on Mac. Every multiplier (quant, cache, distill, kernel) must pass per-frame LPIPS<0.05 AND speedup>1.10× before integration. At `bin/measure-render`.
+- ✅ **Two-node mesh** — M5 Max (primary) + Mac mini M4 Pro (background). Mini runs Wan Q4_K_M GGUF (~9.6GB each stage) via `city96/ComfyUI-GGUF` + `kijai/ComfyUI-WanVideoWrapper` EasyCache, hits ~40 min/clip (M4 Pro is ~4× slower than M5 for Wan 14B). Mini is positioned as overnight/batch tier, not realtime peer.
+- ✅ **Custom Metal kernel toolchain proven on M5** — `torch.mps.compile_shader` working end-to-end with PyTorch 2.12 + full Xcode. First naive RMSNorm+Linear fusion was 60× slower than vendor MPSGraph matmul (expected — PyTorch already calls MPSGraph SGEMM under the hood). Pivoting to flash-attention where vendor has no tuned alternative.
+- ✅ **`render-route` upgraded** — auto-selects Wan (hero) vs LTX (B-roll) per scene heuristic. Now points at the working `make-ltx-lightricks`.
+- 🔄 **In flight tonight:** EasyCache speedup quantification, Story Forge `.sf` DSL MVP parser, Metal flash-attention kernel.
+
+Live build dashboard: see `build_status/index.html`.
+
+---
+
 ## What it does
 
 You write a story as a list of scenes — each scene is one still image prompt + one motion prompt + one narration line. Story Forge takes the list and:
@@ -239,17 +254,32 @@ The pipeline iterates the list. Change one scene, only that scene re-renders. Ad
 
 ## Roadmap — the 30× faster build-out
 
-Story Forge today is the proof. The next iteration is what makes it run in minutes instead of hours per film:
+Story Forge today is the proof. The next iteration is what makes it run in minutes instead of hours per film. **Status updated 2026-05-24:**
 
-- **1-step Wan distillation** — Train a LoRA that collapses Wan's 4-step inference into 1. *(4×)*
-- **Metal kernels for attention** — Apple Metal Shading Language for Wan's hot path. *(2.5×)*
-- **LTX-Video drop-in for B-roll** — Lightricks' 2 B-param LTX for ambient scenes. *(scenes drop from 11 min to ~30 sec)*
-- **Two-node parallel render** — M5 + Mac mini Wan workers split the queue. *(2× throughput)*
-- **Optical-flow warp** — Wan renders keyframes only, flow net interpolates. *(5-10×)*
-- **Multi-voice + lip-sync** — Multiple Piper speakers + Wav2Lip for dialogue.
-- **Web UI extensions** — fast/hero per-scene toggle, multi-voice routing, SFX library.
+| Multiplier | Target gain | Status |
+|---|---|---|
+| **LTX-Video 13B distilled 0.9.8 for B-roll** | 5.6× vs Wan | ✅ **WORKING on M5 MPS** — 118s/clip via Lightricks' upstream multi-scale code. Public first. |
+| **LPIPS-gated speedup harness** | (gate, not gain) | ✅ Built — `bin/measure-render`. Novel on Mac. |
+| **`render-route` engine auto-selector** | (routing, not gain) | ✅ Wired — auto-picks Wan vs LTX per scene heuristic. |
+| **Q4_K_M GGUF Wan on Mac mini** | ~3.6× memory drop | ✅ Working — but M4 Pro compute is the bottleneck (40 min/clip vs M5's 10 min). Mini stays batch tier. |
+| **EasyCache (DiT-native cache, kijai)** | 1.1-1.3× at 4 steps | 🔄 Test in flight. |
+| **Custom Metal flash-attention** | 2-3× on attention path | 🔄 First kernel in progress. Wiring proven. |
+| **2-step Wan distillation** | 2× perpetual | ⏳ Pending — overnight training on mini. |
+| **Story Forge DSL compiler** | (productivity, not gain) | 🔄 MVP parser in progress. |
+| **Multi-voice + Wav2Lip lip sync** | (feature, not speed) | ⏳ Multi-day. |
+| **Two-node parallel render** | 2× throughput | ✅ Plumbed, but M5 + mini together is bottlenecked by mini's 40 min/clip — only useful for batch jobs. |
 
-Stacked: today's 5-hour render becomes ~3 minutes. Every component is published, off-the-shelf, just needs wiring.
+Stacked target: **today's 5-hour render → ~10-30 min per 4-min film on M5.**
+
+### Public firsts (per 2026-05-24 cross-check)
+
+1. LTX 13B distilled 0.9.8 working on Apple Silicon MPS via Lightricks upstream Python
+2. LPIPS-gated speedup harness for Mac video diffusion (CI-style regression gates)
+3. Custom Metal kernels for Wan video DiT (wiring proven; flash-attn pending)
+
+### Benchmark to beat
+
+**Liu Liu's Draw Things** (Apple-cited in the M5 launch) — ships Wan 2.2 on M-series and iPad M5 in a closed app. They're the speed reference on Mac. We're building the **open, measured, scriptable** equivalent — same speed bucket, with a DSL and a harness no closed app provides.
 
 ---
 

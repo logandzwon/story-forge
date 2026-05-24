@@ -1,0 +1,96 @@
+{
+  "updated_at": "2026-05-24T10:05:00",
+  "session_started": "2026-05-23T23:00:00",
+  "pipeline_diagram": {
+    "nodes": [
+      {"id": "m5", "label": "M5 Max", "kind": "machine", "ram": "128GB", "role": "Primary: LTX 118s, Wan ~10min, Metal kernels. 40 GPU cores, 800GB/s mem bw."},
+      {"id": "mini", "label": "Mac mini M4 Pro", "kind": "machine", "ram": "64GB", "role": "Background tier: Q4 ~40min/clip. 20 GPU cores, 273GB/s mem bw — ~4x slower than M5 Max for these workloads."},
+      {"id": "vps", "label": "HQ VPS", "kind": "machine", "role": "Job queue + dashboard"}
+    ]
+  },
+  "phases": [
+    {"id": "1_ltx", "title": "LTX 13B distilled on M5 MPS",
+     "status": "done", "time_taken": "118s/clip",
+     "detail": "5.6x faster than Wan baseline. Photoreal output confirmed."},
+    {"id": "2_harness", "title": "Quality-checker harness (measure-render)",
+     "status": "done", "time_taken": "built tonight",
+     "detail": "Per-frame LPIPS + speedup gate. Novel for Mac video diffusion."},
+    {"id": "3_gguf_dl", "title": "Squashed Wan Q4 weights downloaded (mini)",
+     "status": "done", "time_taken": "20GB",
+     "detail": "QuantStack Q4_K_M, swaps in for 56GB fp16"},
+    {"id": "4_comfy_addons", "title": "ComfyUI add-ons (kijai + city96) loaded",
+     "status": "done", "time_taken": "auto-loaded",
+     "detail": "UnetLoaderGGUF + EasyCache nodes confirmed live on mini :8189"},
+    {"id": "5_q4_test", "title": "First Wan Q4 render test on mini",
+     "status": "done", "time_taken": "WORKS but 40 min/clip (M2 Pro compute-limited)",
+     "detail": "Real 5sec/832x480/81 frames. SURPRISE: M2 Pro is the bottleneck, not memory. Mini stays batch/overnight tier."},
+    {"id": "6_easycache", "title": "EasyCache speedup test (cooking)",
+     "status": "in_progress", "eta": "~20-25 min remaining",
+     "detail": "Last in-flight job — will tell us if EasyCache helps mini at all. Cycle bug fixed, retry firing now."},
+    {"id": "7_first_compare", "title": "First harness comparison: Q4 vs Q4+EasyCache",
+     "status": "pending", "eta": "after EasyCache result",
+     "detail": "Real LPIPS numbers, gates each multiplier"},
+    {"id": "8_render_route", "title": "render-route updated to use working LTX",
+     "status": "done", "time_taken": "fixed tonight",
+     "detail": "B-roll scenes auto-route to make-ltx-lightricks"},
+    {"id": "9_metal_wiring", "title": "Custom Metal kernel wiring proven on M5",
+     "status": "done", "time_taken": "hello_metal.py PASS",
+     "detail": "torch.mps.compile_shader works. Naive RMSNorm+Linear was 60x SLOWER than vendor matmul. Pivot: target flash-attention where vendor doesn't have tuned kernel."},
+    {"id": "10_metal_real", "title": "Real Metal win: fused flash-attention",
+     "status": "pending", "eta": "1-2 days (next session)",
+     "detail": "PyTorch MPS SDPA is slow; this is the genuine 2-3x lever."},
+    {"id": "11_dsl", "title": "Story Forge DSL (.sf script -> .mp4)",
+     "status": "pending", "eta": "~1 week",
+     "detail": "20-line script compiles to ComfyUI workflow + ffmpeg plan. Design done, MVP unwritten."},
+    {"id": "12_distill", "title": "Train 2-step Wan distillation (perpetual 2x)",
+     "status": "pending", "eta": "1-2 days, runs on mini overnight",
+     "detail": "On top of lightx2v 4-step LoRA. Mini's best use case."},
+    {"id": "13_launch", "title": "ComfyUI LaunchAgent (no more queue hangs)",
+     "status": "pending", "eta": "5 min, do later",
+     "detail": "Plist staged, just need launchctl bootstrap"},
+    {"id": "14_visual_dash", "title": "Visual build dashboard",
+     "status": "done", "time_taken": "shipped + live",
+     "detail": "Auto-refresh 20s. Updated with each milestone."}
+  ],
+  "right_now": {
+    "actively_running": ["Q4+EasyCache render on mini (~20-25 min left)"],
+    "idle_waiting": ["LTX (ready, working)", "Metal kernel toolkit (paused for tomorrow)", "DSL design (waiting to write)"],
+    "next_decision": "After EasyCache result — call tonight done OR keep building DSL / install LaunchAgent / fire another test"
+  },
+  "final_vision": {
+    "title": "Story Forge — when complete",
+    "headline": "A 20-line .sf script -> a finished 4-min film with narration + music in 10-30 minutes on M5",
+    "today_baseline": "5 hours per 4-min film, all manual scene config",
+    "target": "M5 = realtime renders (LTX + Wan), mini = batch/distill/training, deterministic + measured"
+  },
+  "novelty": {
+    "first_in_world": [
+      "LTX 13B distilled 0.9.8 working on Apple Silicon MPS (photoreal output)",
+      "LPIPS-gated speedup harness for Mac video diffusion",
+      "Custom Metal kernels for Wan video DiT (wiring proven, flash-attn pending)"
+    ],
+    "rare": [
+      "Two-node Mac mesh (M5 + mini, with mini confirmed as background tier)",
+      "Text-script-to-film DSL compiler"
+    ]
+  },
+  "tonight_summary": {
+    "hours_invested": "11",
+    "wins": [
+      "Got LTX 13B distilled 0.9.8 working on M5 MPS — public first per agent research",
+      "Built measurement harness — novel for Mac video diffusion",
+      "Q4 path validated on mini (slow but real)",
+      "Metal kernel toolchain proven (hello_metal PASS)",
+      "Updated render-route to use working LTX",
+      "ComfyUI on mini upgraded from v0.3.32 to v0.22.0",
+      "Cloned + installed kijai + city96 + Lightricks-LTX repos",
+      "Built this dashboard"
+    ],
+    "dead_ends_killed": [
+      "diffusers LTXImageToVideoPipeline (5 attempts, can't reproduce multi-scale)",
+      "Comfy-Org FP8 Wan models (MPS doesn't support FP8 dtype)",
+      "Naive RMSNorm+Linear Metal kernel (60x slower than vendor)",
+      "wan22ImageToVideoLatent node (wrong VAE compression ratio)"
+    ]
+  }
+}

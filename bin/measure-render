@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""measure-render — gate every speedup multiplier with real numbers.
+
+Workflow:
+  # 1. Save a baseline (full-fat render)
+  measure-render baseline wan_walk_seed42 -- \
+      make-video --i2v walk.png --seed 42 --duration 5 "soft wind"
+
+  # 2. Compare a faster variant against it
+  measure-render compare wan_walk_seed42 -- \
+      make-video --i2v walk.png --seed 42 --duration 5 --gguf "soft wind"
+
+Metrics:
+  - Per-frame LPIPS vs baseline (mean / p95 / max) — perceptual quality drift
+  - Wall-clock speedup
+  - Frame-count / resolution / fps invariance check
+
+Gates (default):
+  - LPIPS mean < 0.05  ("imperceptible")
+  - LPIPS p95  < 0.10  ("rare visible drift only")
+  - Speedup    > 1.10  ("at least a 10% win, else not worth integrating")
+
+Override with --lpips-mean / --lpips-p95 / --min-speedup.
+
+Each baseline lives at ~/AI/videopipe/measurements/<name>/baseline.json
++ baseline.mp4 + frames_baseline/*.png. Candidate runs append a
+results_<timestamp>.json next to the baseline for trend tracking.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+MEAS_ROOT = Path.home() / "AI/videopipe/measurements"
+DEFAULT_FPS = 16
+
+
+def run_render(cmd_argv: list[str]) -> tuple[float, Path]:
+    """Run a render command, return (wall_seconds, mp4_path).
+
+    Renderer is expected to print the output file path. We look for the most
+    recent mp4 under ~/AI/videopipe/outputs/ that's <30s old.
+    """
+    out_dir = Path.home() / "AI/videopipe/outputs"
+    before = {p: p.stat().st_mtime for p in out_dir.glob("*.mp4")}
+    t0 = time.time()
+    rc = subprocess.run(cmd_argv).returncode
+    wall = time.time() - t0
+    if rc != 0:
+        raise SystemExit(f"renderer exited {rc}")
+    after = sorted(out_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    fresh = [p for p in after if before.get(p, 0) < p.stat().st_mtime]
+    if not fresh:
+        raise SystemExit("no new mp4 found in outputs/ after render")
+    return wall, fresh[0]
+
+
+def extract_frames(mp4: Path, out_dir: Path, fps: int) -> int:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.png"):
+        old.unlink()
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(mp4), "-vf", f"fps={fps}",
+         str(out_dir / "frame_%04d.png")],
+        check=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return len(list(out_dir.glob("*.png")))
+
+
+def probe_mp4(mp4: Path) -> dict:
+    """Return {fps, width, height, frames, duration_s}."""
+    out = subprocess.check_output([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,r_frame_rate,nb_frames,duration",
+        "-of", "json", str(mp4),
+    ])
+    s = json.loads(out)["streams"][0]
+    num, den = s["r_frame_rate"].split("/")
+    fps = float(num) / float(den) if float(den) else 0
+    return {
+        "fps": round(fps, 3),
+        "width": int(s["width"]),
+        "height": int(s["height"]),
+        "frames": int(s.get("nb_frames", 0) or 0),
+        "duration_s": float(s.get("duration", 0) or 0),
+    }
+
+
+def compute_lpips(baseline_dir: Path, candidate_dir: Path) -> dict:
+    """Per-frame LPIPS between matched frame indices. Returns {mean, p95, max, n}."""
+    import torch
+    import lpips
+    from PIL import Image
+    import numpy as np
+
+    base_frames = sorted(baseline_dir.glob("frame_*.png"))
+    cand_frames = sorted(candidate_dir.glob("frame_*.png"))
+    n = min(len(base_frames), len(cand_frames))
+    if n == 0:
+        raise SystemExit("no frames to compare")
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    metric = lpips.LPIPS(net="alex").to(device).eval()
+
+    def load_tensor(p: Path) -> torch.Tensor:
+        img = np.array(Image.open(p).convert("RGB"), dtype=np.float32) / 127.5 - 1.0
+        t = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).to(device)
+        return t
+
+    scores = []
+    with torch.no_grad():
+        for i in range(n):
+            a = load_tensor(base_frames[i])
+            b = load_tensor(cand_frames[i])
+            if a.shape != b.shape:
+                b = torch.nn.functional.interpolate(
+                    b, size=a.shape[-2:], mode="bilinear", align_corners=False,
+                )
+            d = metric(a, b).item()
+            scores.append(d)
+
+    arr = sorted(scores)
+    p95_idx = int(0.95 * (len(arr) - 1))
+    return {
+        "n": len(scores),
+        "mean": round(sum(scores) / len(scores), 5),
+        "p95":  round(arr[p95_idx], 5),
+        "max":  round(max(scores), 5),
+    }
+
+
+def cmd_baseline(args):
+    base = MEAS_ROOT / args.name
+    base.mkdir(parents=True, exist_ok=True)
+
+    print(f"[measure] running baseline render: {' '.join(args.render_cmd)}")
+    wall, mp4 = run_render(args.render_cmd)
+    print(f"[measure] baseline wall: {wall:.1f}s -> {mp4.name}")
+
+    shutil.copy2(mp4, base / "baseline.mp4")
+    probe = probe_mp4(base / "baseline.mp4")
+    fps = int(round(probe["fps"])) or DEFAULT_FPS
+    print(f"[measure] extracting {probe['frames']} frames @ {fps}fps...")
+    n = extract_frames(base / "baseline.mp4", base / "frames_baseline", fps)
+
+    meta = {
+        "name": args.name,
+        "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "render_cmd": args.render_cmd,
+        "wall_seconds": round(wall, 2),
+        "probe": probe,
+        "frames_extracted": n,
+    }
+    (base / "baseline.json").write_text(json.dumps(meta, indent=2))
+    print(f"[measure] baseline saved: {base / 'baseline.json'}")
+
+
+def cmd_compare(args):
+    base = MEAS_ROOT / args.name
+    if not (base / "baseline.json").exists():
+        raise SystemExit(f"no baseline at {base}/baseline.json — run `baseline` first")
+    baseline_meta = json.loads((base / "baseline.json").read_text())
+    baseline_wall = baseline_meta["wall_seconds"]
+    baseline_probe = baseline_meta["probe"]
+
+    print(f"[measure] candidate render: {' '.join(args.render_cmd)}")
+    wall, mp4 = run_render(args.render_cmd)
+    print(f"[measure] candidate wall: {wall:.1f}s -> {mp4.name}")
+
+    cand_dir = base / f"cand_{int(time.time())}"
+    cand_dir.mkdir(exist_ok=True)
+    shutil.copy2(mp4, cand_dir / "candidate.mp4")
+    cand_probe = probe_mp4(cand_dir / "candidate.mp4")
+    fps = int(round(cand_probe["fps"])) or DEFAULT_FPS
+    extract_frames(cand_dir / "candidate.mp4", cand_dir / "frames", fps)
+
+    print("[measure] computing LPIPS...")
+    lpips_scores = compute_lpips(base / "frames_baseline", cand_dir / "frames")
+
+    speedup = baseline_wall / wall if wall > 0 else float("inf")
+
+    gates = {
+        f"lpips_mean_under_{args.lpips_mean}": lpips_scores["mean"] < args.lpips_mean,
+        f"lpips_p95_under_{args.lpips_p95}":   lpips_scores["p95"]  < args.lpips_p95,
+        f"speedup_over_{args.min_speedup}":    speedup > args.min_speedup,
+        "fps_match":                            cand_probe["fps"] == baseline_probe["fps"],
+        "frames_match":                         cand_probe["frames"] == baseline_probe["frames"],
+    }
+    verdict = "PASS" if all(gates.values()) else "FAIL"
+
+    report = {
+        "name": args.name,
+        "ran_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "render_cmd": args.render_cmd,
+        "wall_seconds": round(wall, 2),
+        "speedup_vs_baseline": round(speedup, 3),
+        "baseline_wall_seconds": baseline_wall,
+        "lpips": lpips_scores,
+        "candidate_probe": cand_probe,
+        "baseline_probe": baseline_probe,
+        "gates": gates,
+        "verdict": verdict,
+    }
+    report_path = cand_dir / "report.json"
+    report_path.write_text(json.dumps(report, indent=2))
+
+    bar = "=" * 60
+    print(f"\n{bar}\n  {verdict}  speedup={speedup:.2f}x  "
+          f"lpips(mean/p95/max)={lpips_scores['mean']}/{lpips_scores['p95']}/{lpips_scores['max']}\n{bar}")
+    for g, ok in gates.items():
+        print(f"  [{'OK' if ok else 'FAIL'}] {g}")
+    print(f"\nfull report -> {report_path}")
+    sys.exit(0 if verdict == "PASS" else 2)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="action", required=True)
+
+    pb = sub.add_parser("baseline", help="save a baseline render under a name")
+    pb.add_argument("name", help="baseline identifier, e.g. wan_walk_seed42")
+    pb.add_argument("render_cmd", nargs=argparse.REMAINDER,
+                    help="renderer + args after a `--` separator")
+    pb.set_defaults(func=cmd_baseline)
+
+    pc = sub.add_parser("compare", help="compare a candidate render to a baseline")
+    pc.add_argument("name", help="baseline identifier to compare against")
+    pc.add_argument("--lpips-mean", type=float, default=0.05)
+    pc.add_argument("--lpips-p95",  type=float, default=0.10)
+    pc.add_argument("--min-speedup", type=float, default=1.10)
+    pc.add_argument("render_cmd", nargs=argparse.REMAINDER,
+                    help="renderer + args after a `--` separator")
+    pc.set_defaults(func=cmd_compare)
+
+    args = p.parse_args()
+    # strip leading '--' from REMAINDER
+    if args.render_cmd and args.render_cmd[0] == "--":
+        args.render_cmd = args.render_cmd[1:]
+    if not args.render_cmd:
+        raise SystemExit("no render command provided — use `-- <renderer> <args...>`")
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
