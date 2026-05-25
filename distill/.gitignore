@@ -1,0 +1,4 @@
+checkpoints*/
+*.safetensors
+*.log
+__pycache__/

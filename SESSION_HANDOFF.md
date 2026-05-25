@@ -78,6 +78,12 @@ Stack goal: drop a 4-min film render from 5 hours to ~10-30 min. Stacked savings
 | Mini-side Wan render CLI | `~/mini_wan_render.py` on mini | Pushed |
 | Wan distill v1 scaffold | `~/AI/distill/wan_distill_v1.py` on mini | Scaffolded (stubs for ComfyUI WanVideoWrapper integration) |
 
+### 🛑 2026-05-24 midday: the Metal patch CRASHES renders even when "disabled"
+
+Root cause of repeated ComfyUI `Abort trap: 6` crashes during cabin_open renders: the `wan_metal_fused` ComfyUI custom node monkeypatches `WanSelfAttention.forward` at startup. Even with `WAN_METAL_FUSED=0` the patch's *fallback* branch calls plain `F.scaled_dot_product_attention`, **bypassing ComfyUI's native sub-quadratic/split attention**. At Wan i2v's real sequence length (S≈28350 for 832×480×81f) MPS SDPA materializes the full score matrix → tries to allocate a **128 GB** MTLBuffer → `failed assertion ... size 128595600000` → process aborts. The `WAN_METAL_FUSED=0` "safe default" claim was WRONG; the monkeypatch itself is unsafe.
+
+**FIX (applied):** disabled the node — `~/AI/ComfyUI/custom_nodes/wan_metal_fused` → `…/wan_metal_fused.disabled`, removed `/tmp/wan_metal_fused.flag`, cold-restarted ComfyUI. It now logs `Using sub quadratic optimization for attention` and Wan renders fit ~64 GB peak. **DO NOT re-enable that node.** The repo's `metal/` code stays as documented learning, but the live ComfyUI shim must remain disabled. See updated `metal/README.md`.
+
 ### ⚠️ 2026-05-24 morning correction
 
 Last night's session ran ~13 hours and shipped a lot, but two celebrated "wins" were FALSE:
