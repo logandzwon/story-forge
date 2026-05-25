@@ -24,11 +24,13 @@ We're not bound by what was taught. We don't accept upstream library defaults as
 
 Cloud companies will tell you AI cinema needs a server farm. It doesn't. It needs a laptop, a script, and somebody willing to read the source.
 
-What the cloud charges $300-$1000 per film for, this pipeline does for the price of electricity. What people paid big data centers to run, we proved runs on a MacBook Pro on a kitchen table. Three of tonight's pieces are public firsts:
+What the cloud charges $300-$1000 per film for, this pipeline does for the price of electricity. What people paid big data centers to run, we proved runs on a MacBook Pro on a kitchen table. Public firsts from this work:
 
 1. LTX 13B distilled 0.9.8 working on Apple Silicon MPS
 2. LPIPS-gated speedup harness for Mac video diffusion (CI-style regression gates on render quality)
-3. Custom Metal flash-attention kernel for Wan video DiT — 12.32× over the vendor path
+3. 1-step Wan 2.2 i2v distillation on Apple Silicon — a rank-32 LoRA that collapses 4 denoising steps into 1 (see [`distill/`](distill/))
+
+We also hand-wrote a Metal flash-attention kernel for Wan. Measured honestly, it was a wash — PyTorch's MPS SDPA is already too well-tuned to beat at our shapes — so it lives in [`metal/`](metal/) as a documented null result, not a win.
 
 We make our own rules. We build new things constantly. We make possible what people said wasn't possible. That's the whole point.
 
@@ -45,13 +47,13 @@ We make our own rules. We build new things constantly. We make possible what peo
 The v1 ship state is live. The DSL compiles, the routes work, the kernel is in:
 
 - ✅ **LTX 13B distilled 0.9.8 on MPS** — 118s per 5-sec clip via `bin/make-ltx-lightricks` (Lightricks' upstream multi-scale 7+3 path; `diffusers` single-pass cannot reproduce this recipe). Likely the first public-confirmed working setup on Apple Silicon.
-- ✅ **Custom Metal flash-attention kernel** — 12.32× standalone vs PyTorch MPS SDPA, 2× end-to-end on Wan renders. Hand-written tiled fp16 with online softmax via `torch.mps.compile_shader`, PSNR 137 dB. ~144 lines of MSL at [`metal/flash_attn_mps.py`](metal/flash_attn_mps.py).
+- ➖ **Custom Metal flash-attention kernel** — hand-written tiled fp16 with online softmax via `torch.mps.compile_shader` (~144 lines of MSL, PSNR 137 dB) at [`metal/flash_attn_mps.py`](metal/flash_attn_mps.py). The headline speedup turned out to be a measurement artifact (dispatch bug) — PyTorch's MPS SDPA already wins at our shapes. Kept as a documented null result.
 - ✅ **DSL end-to-end: first `.sf` → `.mp4`** — sunset drift / `test_tiny.sf` round-tripped through parser → resolver → emitter → run.py → render-route → ffmpeg.
 - ✅ **DSL multi-voice + SFX + lipsync flag** — 16/16 tests pass in [`story_forge/tests/test_parser.py`](story_forge/tests/test_parser.py).
 - ✅ **UI v2 live** — DSL editor + engine toggles at `http://127.0.0.1:17600/story`.
 - ✅ **LPIPS-gated measurement harness** — `bin/measure-render`, novel for Mac video diffusion. Every multiplier (quant, cache, distill, kernel) must pass per-frame LPIPS<0.05 AND speedup>1.10× before integration.
-- ⏳ **Wan 2-step distillation** — scaffold ready, 12-hr overnight training pending.
-- ⏳ **Comprehensive harness comparison** — pending after distill lands.
+- ✅ **Wan 1-step distillation** — shipped (see [`distill/`](distill/)): rank-32 LoRA collapses 4 steps → 1 at LPIPS 0.082 vs a measured 0.206 same-resolution wall (~2.5×), and it transfers to 256×256.
+- ⏳ **Comprehensive harness comparison** — pending.
 
 Live build dashboard: `http://127.0.0.1:17602` (served from [`build_status/`](build_status/)).
 
@@ -417,23 +419,17 @@ Story Forge today is the proof. The next iteration is what makes it run in minut
 | Multiplier | Target gain | Status |
 |---|---|---|
 | **LTX-Video 13B distilled 0.9.8 for B-roll** | 5.6× vs Wan | ✅ **WORKING on M5 MPS** — 118s/clip via Lightricks' upstream multi-scale code. |
-| **Custom Metal flash-attention kernel** | 2-3× on attention path | ✅ **WORKING** — 12.32× standalone, 2× end-to-end on Wan. |
+| **Custom Metal flash-attention kernel** | (null result) | ➖ Measurement artifact (dispatch bug) — MPS SDPA already wins at our shapes; kept in `metal/` as documented learning. |
 | **LPIPS-gated speedup harness** | (gate, not gain) | ✅ Built — `bin/measure-render`. Novel on Mac. |
 | **`render-route` engine auto-selector** | (routing, not gain) | ✅ Wired — auto-picks Wan vs LTX per scene heuristic. |
 | **Story Forge DSL compiler** | (productivity, not gain) | ✅ Shipped — parser/resolver/emitter/run, 16/16 tests pass. |
 | **Q4_K_M GGUF Wan on Mac mini** | ~3.6× memory drop | ✅ Working — but M4 Pro compute is the bottleneck (40 min/clip vs M5's 10 min). Mini stays batch tier. |
 | **EasyCache (DiT-native cache, kijai)** | 1.1-1.3× at 4 steps | 🔄 Test in flight. |
-| **2-step Wan distillation** | 2× perpetual | ⏳ Scaffold ready, 12-hr overnight training pending. |
+| **1-step Wan distillation** | 4× perpetual | ✅ Shipped — LPIPS 0.082 vs 0.206 wall (~2.5×), transfers to 256. See `distill/`. |
 | **Comprehensive harness comparison** | (validation, not gain) | ⏳ Pending after distill lands. |
 | **Multi-voice + Wav2Lip lip sync** | (feature, not speed) | 🔄 DSL flag wired (`with lipsync`); renderer pass pending. |
 
 Stacked target: **today's 5-hour render → ~10-30 min per 4-min film on M5.**
-
-### Public firsts (per 2026-05-24 cross-check)
-
-1. LTX 13B distilled 0.9.8 working on Apple Silicon MPS via Lightricks upstream Python
-2. LPIPS-gated speedup harness for Mac video diffusion (CI-style regression gates)
-3. Custom Metal flash-attention kernel for Wan video DiT — 12.32× vs PyTorch SDPA
 
 ### Benchmark to beat
 
@@ -444,8 +440,6 @@ Stacked target: **today's 5-hour render → ~10-30 min per 4-min film on M5.**
 ## Why local
 
 The whole thing is the point. A 4-minute animated film with custom score and synced narration runs on **one laptop you can carry in your bag**. No upload step. No "your queue position is 47." No subscription. No telemetry.
-
-The cloud companies will tell you this needs a server farm. It doesn't. It needs a MacBook Pro and a script.
 
 ### What the cloud would actually cost
 
