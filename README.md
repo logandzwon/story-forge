@@ -44,11 +44,11 @@ We make our own rules. We build new things constantly. We make possible what peo
 
 ### ▶ The Lucid Engine — a psychedelic sci-fi short
 
-[![The Lucid Engine — a Story Forge film](./lucid-hero.jpg)](https://www.youtube.com/watch?v=PDGCUxmIQfQ)
+[![The Lucid Engine — a Story Forge film](./lucid-hero.jpg)](https://www.youtube.com/watch?v=31ZeFu-ePcc)
 
 A ~4:30 short generated end-to-end on one laptop. No cloud. An uploaded mind, uncertain what's real, pieces together how the world ended and what it became — told across five acts (**The Waking → The Wrongness → The Truth → The Hunt → The Break → Resolution**) with a first-person narration spine, character dialogue with baked lip sync, same-location multi-angle coverage, a unified color grade, and an original Song Forge score under a low-drone / boom / shimmer sound-design bus.
 
-[**▶ Watch on YouTube**](https://www.youtube.com/watch?v=PDGCUxmIQfQ) · [Download `The_Lucid_Engine.mp4`](https://github.com/nicedreamzapp/story-forge/releases/tag/lucid-engine)
+[**▶ Watch on YouTube**](https://www.youtube.com/watch?v=31ZeFu-ePcc) · [Download `The_Lucid_Engine.mp4`](https://github.com/nicedreamzapp/story-forge/releases/tag/lucid-engine)
 
 Pipeline: **Flux** (stills) → **LTX-2 distilled** (motion) → **Piper** (narration) → **ffmpeg** (grade, transitions, sound, mux). 100% local.
 
