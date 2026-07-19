@@ -19,16 +19,6 @@ Story Forge is a self-contained pipeline that takes a structured story descripti
 ---
 
 
-## 🎬 WATCH THE FILMS
-
-Everything below was generated start to finish by this pipeline on one M5 Max MacBook (128GB). Click any poster to watch.
-
-| | |
-|---|---|
-| [![The Lucid Engine](https://img.youtube.com/vi/31ZeFu-ePcc/mqdefault.jpg)](https://youtu.be/31ZeFu-ePcc)<br>**The Lucid Engine** | [![Antarctica](https://img.youtube.com/vi/B3Zcr8saHCo/mqdefault.jpg)](https://youtu.be/B3Zcr8saHCo)<br>**Antarctica: The Continent We Just Met** |
-| [![The Little Robot Who Built Himself](https://img.youtube.com/vi/c8OYNDGtvXw/mqdefault.jpg)](https://youtu.be/c8OYNDGtvXw)<br>**The Little Robot Who Built Himself** | [![The Bear Sister](https://img.youtube.com/vi/_bFQTl7_vF4/mqdefault.jpg)](https://youtu.be/_bFQTl7_vF4)<br>**The Bear Sister** |
-
-All the films plus what Story Forge is: [nicedreamzwholesale.com/software/story-forge](https://nicedreamzwholesale.com/software/story-forge/)
 
 
 ## The manifesto
