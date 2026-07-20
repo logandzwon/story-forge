@@ -64,7 +64,8 @@ The v1 ship state is live. The DSL compiles, the routes work, the kernel is in:
 - ✅ **LTX 13B distilled 0.9.8 on MPS** — 118s per 5-sec clip via `bin/make-ltx-lightricks` (Lightricks' upstream multi-scale 7+3 path; `diffusers` single-pass cannot reproduce this recipe). Likely the first public-confirmed working setup on Apple Silicon.
 - ➖ **Custom Metal flash-attention kernel** — hand-written tiled fp16 with online softmax via `torch.mps.compile_shader` (~144 lines of MSL, PSNR 137 dB) at [`metal/flash_attn_mps.py`](metal/flash_attn_mps.py). The headline speedup turned out to be a measurement artifact (dispatch bug) — PyTorch's MPS SDPA already wins at our shapes. Kept as a documented null result.
 - ✅ **DSL end-to-end: first `.sf` → `.mp4`** — sunset drift / `test_tiny.sf` round-tripped through parser → resolver → emitter → run.py → render-route → ffmpeg.
-- ✅ **DSL multi-voice + SFX + lipsync flag** — 16/16 tests pass in [`story_forge/tests/test_parser.py`](story_forge/tests/test_parser.py).
+- ✅ **DSL, runner, and lip-sync coverage** — 29 focused Story Forge tests pass
+  across [`story_forge/tests/`](story_forge/tests/).
 - ✅ **UI v2 live** — DSL editor + engine toggles at `http://127.0.0.1:17600/story`.
 - ✅ **LPIPS-gated measurement harness** — `bin/measure-render`, novel for Mac video diffusion. Every multiplier (quant, cache, distill, kernel) must pass per-frame LPIPS<0.05 AND speedup>1.10× before integration.
 - ✅ **Wan 1-step distillation** — shipped (see [`distill/`](distill/)): rank-32 LoRA collapses 4 steps → 1 at LPIPS 0.082 vs a measured 0.206 same-resolution wall (~2.5×), and it transfers to 256×256.
@@ -74,19 +75,166 @@ Live build dashboard: `http://127.0.0.1:17602` (served from [`build_status/`](bu
 
 ---
 
-## Quickstart
+## Local Apple Silicon environment in this fork
 
-Four lines from clone to first film:
+This fork adds a portable, project-local implementation of the complete lean
+movie path. It removes the original author's machine-specific absolute paths
+and keeps source checkouts, Python environments, models, work files, and final
+movies underneath the Story Forge checkout.
 
-```bash
-git clone https://github.com/nicedreamzapp/story-forge
-cd story-forge
-./bin/sf parse story_forge/examples/test_tiny.sf   # parser sanity (instant)
-./bin/sf render story_forge/examples/test_tiny.sf  # ~2 min on M5 Max
-# output: ~/AI/videopipe/outputs/test_tiny.mp4
+The currently supported local path is:
+
+```text
+.sf -> FLUX.1-schnell still -> Wan2.2 A14B or LTX motion -> ffmpeg -> MP4
+                              +-> Piper narration
+                              +-> ACE-Step music
+                              +-> optional Wav2Lip inset
 ```
 
-That's it. `test_tiny.sf` is a single LTX scene, 3 seconds, no narration — the smallest end-to-end loop the pipeline runs. Once it produces an mp4, the heavier examples (`cabin_open.sf`, multi-scene films) work the same way.
+Changes included in this fork:
+
+- Portable repository-relative paths in `bin/sf`, `story_forge/run.py`, the
+  motion router, and the LTX wrapper.
+- A local FLUX.1-schnell still generator for Apple Silicon MPS.
+- A ComfyUI API workflow for Wan2.2 I2V A14B using Q4_K_M HighNoise and
+  LowNoise experts plus their matching LightX2V four-step LoRAs.
+- Correct Wan temporal sizing: a native five-second render at 16 fps is 81
+  frames (`4n+1`), rather than being rounded down to 77 frames.
+- An optional Diffusers Wan2.2 TI2V 5B implementation retained for lower-cost
+  experiments; `motion wan` now routes to the higher-quality A14B workflow.
+- Selectable LTX 2B or 13B distilled 0.9.8 checkpoints. The portable setup
+  defaults to 2B; 13B remains opt-in for machines with more unified memory.
+- Local Piper narration, ACE-Step 1.5 instrumental score generation, and
+  narration-plus-music mixing.
+- Local Wav2Lip support with a compatibility patch for current Python,
+  NumPy, librosa, OpenCV, and PyTorch.
+- Scene-aware lip-sync portraits. When no explicit driver portrait is set,
+  Story Forge uses the current scene still instead of a generic adult face.
+- A repeatable setup script, integrated narration/music/lip-sync example,
+  additional tests, and Git ignores for all large/generated local assets.
+
+### Requirements
+
+- Apple Silicon Mac
+- `git`, `uv`, `ffmpeg`, and `curl`
+- Python 3.12 (created and managed by `uv`)
+- A Hugging Face account with the FLUX.1-schnell terms accepted
+- At least 95 GB free disk space for the default complete setup
+
+### Install
+
+```bash
+git clone https://github.com/logandzwon/story-forge.git
+cd story-forge
+./bin/setup-local
+.venv/bin/hf auth login
+```
+
+Accept the FLUX license before the first still render:
+[black-forest-labs/FLUX.1-schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell).
+The Hugging Face token is stored in the user's Hugging Face cache, outside
+this repository, and is not committed by Git.
+
+The setup script installs isolated environments and downloads:
+
+- FLUX.1-schnell on first use.
+- Wan2.2 I2V A14B HighNoise and LowNoise Q4_K_M experts.
+- Both matching LightX2V four-step LoRAs, UMT5 XXL FP8, and the Wan VAE.
+- LTX-Video 2B distilled 0.9.8 and its spatial upscaler.
+- Piper LibriTTS_R medium narration voice.
+- ACE-Step 1.5 Turbo, its language/embedding models, and VAE.
+- Wav2Lip GAN and S3FD face-detection checkpoints.
+- ComfyUI and the ComfyUI-GGUF custom node.
+
+Downloaded models, cloned inference repositories, virtual environments,
+renders, and work files are deliberately ignored by Git.
+
+### Quickstart
+
+```bash
+.venv/bin/python bin/sf parse story_forge/examples/test_tiny.sf
+.venv/bin/python bin/sf render story_forge/examples/test_tiny.sf
+# output: outputs/test_tiny.mp4
+```
+
+`test_tiny.sf` is the smallest end-to-end parser and renderer check. The
+complete feature example is
+[`story_forge/examples/integrated_demo.sf`](story_forge/examples/integrated_demo.sf).
+It demonstrates Piper narration, ACE-Step music, and optional Wav2Lip.
+
+The four-scene narrator-only example developed with this fork is
+[`mayce_and_the_little_star.sf`](mayce_and_the_little_star.sf). Its approved
+version uses Wan A14B for every scene, narration plus instrumental music, and
+no talking-head overlay or character voice-over.
+
+### Model selection
+
+Wan A14B is now the default `motion wan` path. For a direct A14B check:
+
+```bash
+./bin/make-wan-a14b \
+  --i2v work/example/still_01.png \
+  --duration 5 --res 832x480 --label wan-check --seed 123 \
+  "subtle natural character movement, cinematic camera motion"
+```
+
+LTX defaults to the 2B checkpoint. To use the original author's 13B path,
+download the larger checkpoint and opt in explicitly:
+
+```bash
+.venv/bin/hf download Lightricks/LTX-Video \
+  ltxv-13b-0.9.8-distilled.safetensors \
+  --local-dir models/ltx
+
+STORY_FORGE_LTX_MODEL=13b \
+  .venv/bin/python bin/sf render story_forge/examples/test_tiny.sf
+```
+
+The 13B LTX checkpoint was validated by the upstream author on a 128 GB Mac.
+The 2B checkpoint is the safer LTX choice on a 64 GB machine. Wan A14B's two
+quantized experts are loaded sequentially by ComfyUI and have been verified
+on the 64 GB M2 Max used for this fork, although full clips render slowly.
+
+### Narration, music, and lip-sync
+
+```text
+voice warm: piper/en_US-libritts_r-medium speaker=0 length=1.08
+music gentle: ace/soft-cinematic-piano vol=0.22
+
+narrate warm:
+    line: "A little star fell softly into the garden."
+music gentle vol=0.22
+```
+
+Add `with lipsync=wav2lip` to a narration declaration to request a Wav2Lip
+inset. By default, its face source is that scene's generated still. Set
+`STORY_FORGE_LIPSYNC_DRIVER=/absolute/path/to/portrait.png` only when a
+specific front-facing portrait is desired.
+
+Wav2Lip's public checkpoint is licensed for personal, research, and
+non-commercial use. Obtain appropriate rights or replace the backend before
+commercial distribution.
+
+### Environment overrides
+
+| Variable | Purpose |
+|---|---|
+| `STORY_FORGE_PYTHON` | Python executable used by generators |
+| `STORY_FORGE_FLUX_BIN` | Alternative FLUX still generator |
+| `STORY_FORGE_FLUX_MODEL` | Alternative Diffusers FLUX model ID |
+| `STORY_FORGE_HF_CACHE` | Hugging Face model-cache directory |
+| `STORY_FORGE_LTX_REPO` | LTX-Video source checkout |
+| `STORY_FORGE_LTX_MODEL_DIR` | Directory containing LTX checkpoints |
+| `STORY_FORGE_LTX_MODEL` | Select `2b` (default) or `13b` |
+| `STORY_FORGE_OUTPUT_DIR` | Motion and final movie output directory |
+| `STORY_FORGE_PIPER_BIN` | Piper executable override |
+| `STORY_FORGE_PIPER_MODEL` | Piper ONNX voice model override |
+| `STORY_FORGE_ACE_PYTHON` | ACE-Step environment Python |
+| `STORY_FORGE_ACE_BIN` | Alternative ACE-Step music wrapper |
+| `STORY_FORGE_COMFY_PORT` | Local ComfyUI API port (default `8190`) |
+| `STORY_FORGE_LIPSYNC_DRIVER` | Explicit lip-sync driver portrait |
+
+For additional setup notes, see [`LOCAL_SETUP.md`](LOCAL_SETUP.md).
 
 ---
 
@@ -102,8 +250,8 @@ That's it. `test_tiny.sf` is a single LTX scene, 3 seconds, no narration — the
                                           render-route (per-scene engine pick)
                                               │                       │
                                               ▼                       ▼
-                                  make-ltx-lightricks         make-video --i2v
-                                  (LTX 13B distilled)         (Wan 2.2 14B + Metal flash-attn)
+                                  make-ltx-lightricks        make-wan-a14b
+                                  (LTX 2B/13B distilled)     (Wan2.2 A14B GGUF + ComfyUI)
                                               │                       │
                                               └───────────┬───────────┘
                                                           ▼
@@ -117,8 +265,11 @@ That's it. `test_tiny.sf` is a single LTX scene, 3 seconds, no narration — the
 ```
 
 - **`render-route`** auto-selects Wan (hero shots with character action / faces / dialogue) or LTX (B-roll / atmosphere / wide shots) per scene based on the motion prompt, or honors an explicit `motion wan:` / `motion ltx:` block in the DSL.
-- **The Metal flash-attention kernel** sits inside the Wan path and is the reason the M5 hero shots come in inside human attention spans.
-- **Piper + ACE-Step** run in parallel with the video renders, then `ffmpeg` does sidechain-ducked mixing and xfade stitching at the end.
+- **Wan A14B** uses dual quantized experts through the local ComfyUI API. The
+  checked-in Metal experiment remains documented, but is not part of this
+  fork's default Wan route.
+- **Piper + ACE-Step** create narration and an instrumental bed, then `ffmpeg`
+  places narration at scene boundaries, mixes the score, and stitches scenes.
 
 ---
 
@@ -212,8 +363,12 @@ The parser, resolver, and emitter live in [`story_forge/parser.py`](story_forge/
 story-forge/
 ├── bin/
 │   ├── sf                    # DSL CLI: sf parse / sf render
-│   ├── make-ltx-lightricks   # LTX 13B distilled 0.9.8 wrapper (the working path)
-│   ├── make-video            # Wan 2.2 14B i2v wrapper (uses Metal flash-attn)
+│   ├── setup-local           # Reproducible local environments + model setup
+│   ├── make-flux-still       # FLUX.1-schnell stills on Apple Silicon MPS
+│   ├── make-ltx-lightricks   # Selectable LTX 2B/13B distilled wrapper
+│   ├── make-wan-a14b         # Wan2.2 A14B dual-expert ComfyUI workflow
+│   ├── make-wan-motion       # Optional Wan2.2 TI2V 5B Diffusers path
+│   ├── make-music            # ACE-Step 1.5 instrumental generator
 │   ├── render-route          # Per-scene engine picker (Wan vs LTX)
 │   └── measure-render        # LPIPS-gated speedup harness
 │
@@ -222,9 +377,13 @@ story-forge/
 │   ├── resolver.py           # Variable interpolation + preset resolution
 │   ├── emitter.py            # AST → .storyplan.json IR
 │   ├── run.py                # IR → render-route + ffmpeg bridge
-│   ├── examples/             # cabin_open.sf, test_tiny.sf
-│   └── tests/                # test_parser.py — 16/16 green
+│   ├── examples/             # test_tiny, cabin, and integrated A/V examples
+│   └── tests/                # Parser, resolver, runner, and lip-sync tests
 │
+├── patches/
+│   └── wav2lip-modern.patch  # Modern dependency compatibility patch
+├── LOCAL_SETUP.md            # Concise local installation and usage guide
+├── mayce_and_the_little_star.sf # Four-scene Wan A14B example story
 ├── metal/
 │   ├── flash_attn_mps.py     # 144-line MSL tiled flash-attn kernel
 │   ├── verify_flash_attn.py  # PSNR + speedup validator
@@ -377,11 +536,13 @@ To prove the pipeline, the first thing through it is a **two-act, 4:08 animated 
 
 | Stage | Tool | Model | Purpose |
 |---|---|---|---|
-| Still image per scene | [Flux 1 Dev FP8](https://huggingface.co/black-forest-labs/FLUX.1-dev) | 16 GB | Sets composition + character look |
-| Hero motion (faces / action) | [Wan 2.2 i2v](https://huggingface.co/Wan-AI) | 27 GB + 1 GB lightx2v LoRA | 5-sec native motion, Metal flash-attn accelerated |
-| B-roll motion (atmosphere) | [LTX-Video 13B distilled 0.9.8](https://huggingface.co/Lightricks) | 13 GB | 118s/clip on M5 — 5.6× faster than Wan |
+| Still image per scene | [FLUX.1-schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell) | ~31 GB cache | Four-step MPS still generation |
+| Hero motion (faces / action) | [Wan2.2 I2V A14B GGUF](https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF) | ~27 GB complete | Dual-expert Q4_K_M ComfyUI workflow with LightX2V LoRAs |
+| Optional lower-cost motion | Wan2.2 TI2V 5B | ~32 GB | Diffusers I2V experiment retained outside the default route |
+| B-roll motion (atmosphere) | [LTX-Video distilled 0.9.8](https://huggingface.co/Lightricks/LTX-Video) | ~6.4 GB for 2B | 2B default; optional 13B on high-memory Macs |
 | Voice narration | [Piper TTS](https://github.com/rhasspy/piper) | LibriTTS_R medium + others | Per-voice presets in DSL |
-| Music + SFX | [Song Forge / ACE-Step](https://github.com/ace-step/ACE-Step) | 13 GB | Original instrumentals + scene SFX |
+| Music | [ACE-Step 1.5](https://github.com/ACE-Step/ACE-Step-1.5) | ~9.5 GB checkpoints | Original instrumental score beneath narration |
+| Optional lip-sync | [Wav2Lip](https://github.com/Rudrabha/Wav2Lip) | ~225 MB checkpoints | Audio-driven character inset using the scene still by default |
 | Compose | [ffmpeg 8.1](https://ffmpeg.org/) | — | xfade, sidechain ducking, fades, mux |
 | Title cards | [Pillow](https://pillow.readthedocs.io/) | — | PNG text overlays |
 
@@ -437,12 +598,12 @@ Story Forge today is the proof. The next iteration is what makes it run in minut
 | **Custom Metal flash-attention kernel** | (null result) | ➖ Measurement artifact (dispatch bug) — MPS SDPA already wins at our shapes; kept in `metal/` as documented learning. |
 | **LPIPS-gated speedup harness** | (gate, not gain) | ✅ Built — `bin/measure-render`. Novel on Mac. |
 | **`render-route` engine auto-selector** | (routing, not gain) | ✅ Wired — auto-picks Wan vs LTX per scene heuristic. |
-| **Story Forge DSL compiler** | (productivity, not gain) | ✅ Shipped — parser/resolver/emitter/run, 16/16 tests pass. |
+| **Story Forge DSL compiler** | (productivity, not gain) | ✅ Shipped — parser/resolver/emitter/run; 29 focused tests pass. |
 | **Q4_K_M GGUF Wan on Mac mini** | ~3.6× memory drop | ✅ Working — but M4 Pro compute is the bottleneck (40 min/clip vs M5's 10 min). Mini stays batch tier. |
 | **EasyCache (DiT-native cache, kijai)** | 1.1-1.3× at 4 steps | 🔄 Test in flight. |
 | **1-step Wan distillation** | 4× perpetual | ✅ Shipped — LPIPS 0.082 vs 0.206 wall (~2.5×), transfers to 256. See `distill/`. |
 | **Comprehensive harness comparison** | (validation, not gain) | ⏳ Pending after distill lands. |
-| **Multi-voice + Wav2Lip lip sync** | (feature, not speed) | 🔄 DSL flag wired (`with lipsync`); renderer pass pending. |
+| **Multi-voice + Wav2Lip lip sync** | (feature, not speed) | ✅ Local renderer pass implemented; scene still is the safe default driver. |
 
 Stacked target: **today's 5-hour render → ~10-30 min per 4-min film on M5.**
 
