@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 # Ensure the story_forge package is importable when this CLI is run directly.
-REPO = Path("/Users/dtribe/Desktop/PROJECTS/AI/videopipe")
+REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
@@ -74,7 +74,7 @@ def cmd_render(args: argparse.Namespace) -> int:
 
     # Default output path: ~/AI/videopipe/outputs/<slug>.mp4
     slug = plan["film_meta"].get("slug", path.stem)
-    default_out = Path.home() / "AI" / "videopipe" / "outputs" / f"{slug}.mp4"
+    default_out = REPO / "outputs" / f"{slug}.mp4"
     out_path = Path(args.out) if args.out else default_out
 
     scene_filter = ([s.strip() for s in args.scenes.split(",") if s.strip()]

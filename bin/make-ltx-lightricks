@@ -34,7 +34,10 @@ import time
 from pathlib import Path
 
 # --- Wire Lightricks' module into sys.path ----------------------------------
-LIGHTRICKS_REPO = Path(__file__).resolve().parent.parent / "LTX-Video"
+STORY_FORGE_ROOT = Path(__file__).resolve().parent.parent
+LIGHTRICKS_REPO = Path(os.environ.get(
+    "STORY_FORGE_LTX_REPO", str(STORY_FORGE_ROOT / "LTX-Video")
+))
 if not (LIGHTRICKS_REPO / "ltx_video" / "inference.py").exists():
     sys.exit(f"[ltxL] Lightricks repo not found at {LIGHTRICKS_REPO}. "
              f"Clone with: git clone https://github.com/Lightricks/LTX-Video.git "
@@ -42,16 +45,21 @@ if not (LIGHTRICKS_REPO / "ltx_video" / "inference.py").exists():
 sys.path.insert(0, str(LIGHTRICKS_REPO))
 
 # --- Local model paths (no HF downloads for the big checkpoint) -------------
-LOCAL_TRANSFORMER = (
-    Path.home()
-    / "AI/ComfyUI/models/diffusion_models/ltx/ltxv-13b-0.9.8-distilled.safetensors"
+LOCAL_MODEL_DIR = Path(os.environ.get(
+    "STORY_FORGE_LTX_MODEL_DIR", str(STORY_FORGE_ROOT / "models" / "ltx")
+))
+LTX_MODEL_SIZE = os.environ.get("STORY_FORGE_LTX_MODEL", "2b").lower()
+if LTX_MODEL_SIZE not in {"2b", "13b"}:
+    sys.exit("[ltxL] STORY_FORGE_LTX_MODEL must be '2b' or '13b'")
+LOCAL_TRANSFORMER = LOCAL_MODEL_DIR / (
+    f"ltxv-{LTX_MODEL_SIZE}-0.9.8-distilled.safetensors"
 )
 # Spatial upscaler is REQUIRED by the multi-scale pipeline (~400MB). If we
 # don't have it locally, Lightricks' infer() will hf_hub_download it on first
 # run. Cache it next to the transformer for future offline use.
 LOCAL_UPSCALER_DIR = LOCAL_TRANSFORMER.parent
 LOCAL_UPSCALER = LOCAL_UPSCALER_DIR / "ltxv-spatial-upscaler-0.9.8.safetensors"
-CONFIG_NAME = "configs/ltxv-13b-0.9.8-distilled.yaml"
+CONFIG_NAME = f"configs/ltxv-{LTX_MODEL_SIZE}-0.9.8-distilled.yaml"
 
 
 def get_args():
@@ -68,7 +76,7 @@ def get_args():
         "low quality, ugly, deformed"))
     p.add_argument("--cond-strength", type=float, default=1.0,
                    help="how strongly the input still anchors frame 0 (0..1)")
-    p.add_argument("--out-dir", default=str(Path.home() / "AI/videopipe/outputs"))
+    p.add_argument("--out-dir", default=str(STORY_FORGE_ROOT / "outputs"))
     p.add_argument("--keep-lightricks-output", action="store_true",
                    help="leave the file in LTX-Video/outputs/ in addition to copying it")
     return p.parse_args()

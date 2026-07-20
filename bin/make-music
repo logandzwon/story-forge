@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Generate an instrumental score with ACE-Step 1.5."""
+
+import argparse
+import shutil
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+ACE_ROOT = ROOT / "ACE-Step-1.5"
+sys.path.insert(0, str(ACE_ROOT))
+
+from acestep.handler import AceStepHandler
+from acestep.llm_inference import LLMHandler
+from acestep.inference import GenerationConfig, GenerationParams, generate_music
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("prompt")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--duration", type=float, default=10.0)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    root = ROOT
+    ace_root = ACE_ROOT
+    out = Path(args.out).resolve()
+    staging = root / "work" / "ace-step"
+    staging.mkdir(parents=True, exist_ok=True)
+
+    dit = AceStepHandler()
+    status, ok = dit.initialize_service(
+        project_root=str(ace_root),
+        config_path="acestep-v15-turbo",
+        device="mps",
+        use_flash_attention=False,
+        compile_model=False,
+        offload_to_cpu=False,
+        offload_dit_to_cpu=False,
+        quantization=None,
+    )
+    if not ok:
+        raise RuntimeError(f"ACE-Step initialization failed: {status}")
+
+    params = GenerationParams(
+        caption=args.prompt,
+        lyrics="[Instrumental]",
+        instrumental=True,
+        duration=max(10.0, args.duration),
+        inference_steps=8,
+        seed=args.seed,
+        thinking=False,
+        use_cot_metas=False,
+        use_cot_caption=False,
+        use_cot_language=False,
+    )
+    config = GenerationConfig(
+        batch_size=1,
+        seeds=[args.seed],
+        use_random_seed=False,
+        audio_format="wav",
+    )
+    result = generate_music(dit, LLMHandler(), params, config,
+                            save_dir=str(staging))
+    if not result.success or not result.audios:
+        raise RuntimeError(f"ACE-Step generation failed: {result.error}")
+    src = Path(result.audios[0]["path"])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, out)
+    print(f"[music] done -> {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

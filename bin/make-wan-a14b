@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Wan2.2 I2V A14B Q4 dual-expert rendering through local ComfyUI."""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+COMFY = ROOT / "ComfyUI"
+COMFY_PYTHON = COMFY / ".venv" / "bin" / "python"
+PORT = int(os.environ.get("STORY_FORGE_COMFY_PORT", "8190"))
+SERVER = f"http://127.0.0.1:{PORT}"
+
+HIGH = "HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf"
+LOW = "LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf"
+HIGH_LORA = ("split_files/loras/"
+             "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors")
+LOW_LORA = ("split_files/loras/"
+            "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors")
+TEXT_ENCODER = ("split_files/text_encoders/"
+                "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
+VAE = "split_files/vae/wan_2.1_vae.safetensors"
+
+
+def request_json(path: str, payload=None):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(
+        SERVER + path, data=data,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return json.load(response)
+
+
+def ensure_server():
+    try:
+        request_json("/system_stats")
+        return None
+    except Exception:
+        pass
+    log_dir = ROOT / "work" / "comfyui"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log = (log_dir / "server.log").open("a")
+    proc = subprocess.Popen(
+        [str(COMFY_PYTHON), "main.py", "--listen", "127.0.0.1",
+         "--port", str(PORT), "--disable-auto-launch"],
+        cwd=COMFY, stdout=log, stderr=subprocess.STDOUT,
+        start_new_session=True)
+    for _ in range(180):
+        if proc.poll() is not None:
+            raise RuntimeError(f"ComfyUI exited; see {log.name}")
+        try:
+            request_json("/system_stats")
+            return proc
+        except Exception:
+            time.sleep(1)
+    raise RuntimeError(f"ComfyUI did not start; see {log.name}")
+
+
+def ref(node: str, output: int = 0):
+    return [node, output]
+
+
+def workflow(image_name: str, prompt: str, width: int, height: int,
+             frames: int, seed: int, prefix: str):
+    negative = ("overexposed, static, blurry details, subtitles, painting, "
+                "still frame, gray cast, worst quality, low quality, JPEG "
+                "artifacts, ugly, malformed limbs, fused fingers, clutter")
+    return {
+        "1": {"class_type": "UnetLoaderGGUF",
+              "inputs": {"unet_name": HIGH}},
+        "2": {"class_type": "UnetLoaderGGUF",
+              "inputs": {"unet_name": LOW}},
+        "3": {"class_type": "LoraLoaderModelOnly",
+              "inputs": {"model": ref("1"), "lora_name": HIGH_LORA,
+                         "strength_model": 1.0}},
+        "4": {"class_type": "LoraLoaderModelOnly",
+              "inputs": {"model": ref("2"), "lora_name": LOW_LORA,
+                         "strength_model": 1.0}},
+        "5": {"class_type": "ModelSamplingSD3",
+              "inputs": {"model": ref("3"), "shift": 5.0}},
+        "6": {"class_type": "ModelSamplingSD3",
+              "inputs": {"model": ref("4"), "shift": 5.0}},
+        "7": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": TEXT_ENCODER, "type": "wan",
+                         "device": "cpu"}},
+        "8": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": prompt, "clip": ref("7")}},
+        "9": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": negative, "clip": ref("7")}},
+        "10": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
+        "11": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+        "12": {"class_type": "WanImageToVideo",
+               "inputs": {"positive": ref("8"), "negative": ref("9"),
+                          "vae": ref("10"), "width": width,
+                          "height": height, "length": frames,
+                          "batch_size": 1, "start_image": ref("11")}},
+        "13": {"class_type": "KSamplerAdvanced",
+               "inputs": {"model": ref("5"), "add_noise": "enable",
+                          "noise_seed": seed, "steps": 4, "cfg": 1.0,
+                          "sampler_name": "euler", "scheduler": "simple",
+                          "positive": ref("12", 0), "negative": ref("12", 1),
+                          "latent_image": ref("12", 2), "start_at_step": 0,
+                          "end_at_step": 2,
+                          "return_with_leftover_noise": "enable"}},
+        "14": {"class_type": "KSamplerAdvanced",
+               "inputs": {"model": ref("6"), "add_noise": "disable",
+                          "noise_seed": seed, "steps": 4, "cfg": 1.0,
+                          "sampler_name": "euler", "scheduler": "simple",
+                          "positive": ref("12", 0), "negative": ref("12", 1),
+                          "latent_image": ref("13"), "start_at_step": 2,
+                          "end_at_step": 4,
+                          "return_with_leftover_noise": "disable"}},
+        "15": {"class_type": "VAEDecode",
+               "inputs": {"samples": ref("14"), "vae": ref("10")}},
+        "16": {"class_type": "CreateVideo",
+               "inputs": {"images": ref("15"), "fps": 16.0}},
+        "17": {"class_type": "SaveVideo",
+               "inputs": {"video": ref("16"), "filename_prefix": prefix,
+                          "format": "mp4", "codec": "h264"}},
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("prompt")
+    parser.add_argument("--i2v", required=True)
+    parser.add_argument("--duration", type=float, default=5.0)
+    parser.add_argument("--res", default="832x480")
+    parser.add_argument("--label", default="wan-a14b")
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    required = [
+        COMFY / "models" / "diffusion_models" / HIGH,
+        COMFY / "models" / "diffusion_models" / LOW,
+        COMFY / "models" / "loras" / HIGH_LORA,
+        COMFY / "models" / "loras" / LOW_LORA,
+        COMFY / "models" / "text_encoders" / TEXT_ENCODER,
+        COMFY / "models" / "vae" / VAE,
+    ]
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise SystemExit("Wan A14B files missing:\n" + "\n".join(missing))
+
+    width, height = (int(value) for value in args.res.lower().split("x"))
+    width, height = width // 16 * 16, height // 16 * 16
+    frames = max(5, int(args.duration * 16))
+    # Wan temporal latents require 4n+1 frames. Round up so a native five
+    # seconds at 16 fps becomes the author-standard 81 frames, never 77.
+    frames = (frames + 3) // 4 * 4 + 1
+    token = uuid.uuid4().hex[:8]
+    image_name = f"story_forge_{token}{Path(args.i2v).suffix.lower()}"
+    shutil.copy2(Path(args.i2v), COMFY / "input" / image_name)
+    prefix = f"story_forge/{args.label}_{token}"
+
+    ensure_server()
+    queued = request_json("/prompt", {
+        "prompt": workflow(image_name, args.prompt, width, height, frames,
+                           args.seed, prefix),
+        "client_id": f"story-forge-{token}",
+    })
+    prompt_id = queued["prompt_id"]
+    print(f"[wan-a14b] queued {prompt_id}: {width}x{height}x{frames}", flush=True)
+    while True:
+        history = request_json(f"/history/{prompt_id}")
+        if prompt_id in history:
+            result = history[prompt_id]
+            if result.get("status", {}).get("status_str") == "error":
+                raise RuntimeError(json.dumps(result.get("status"), indent=2))
+            outputs = result.get("outputs", {}).get("17", {})
+            videos = (outputs.get("videos") or outputs.get("gifs")
+                      or outputs.get("images") or [])
+            if not videos:
+                raise RuntimeError(f"SaveVideo returned no file: {outputs}")
+            item = videos[0]
+            src = COMFY / "output" / item.get("subfolder", "") / item["filename"]
+            out_dir = ROOT / "outputs"
+            out_dir.mkdir(exist_ok=True)
+            out = out_dir / f"{args.label}_wanA14B_{int(time.time())}.mp4"
+            shutil.copy2(src, out)
+            print(f"[wan-a14b] done -> {out}")
+            return 0
+        time.sleep(5)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

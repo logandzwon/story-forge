@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+command -v uv >/dev/null || {
+  echo "uv is required: https://docs.astral.sh/uv/" >&2
+  exit 1
+}
+
+if [[ ! -d LTX-Video/.git ]]; then
+  git clone https://github.com/Lightricks/LTX-Video.git LTX-Video
+fi
+if [[ ! -d ACE-Step-1.5/.git ]]; then
+  git clone https://github.com/ACE-Step/ACE-Step-1.5.git ACE-Step-1.5
+fi
+if [[ ! -d Wav2Lip/.git ]]; then
+  git clone https://github.com/Rudrabha/Wav2Lip.git Wav2Lip
+fi
+if [[ ! -d ComfyUI/.git ]]; then
+  git clone https://github.com/comfyanonymous/ComfyUI.git ComfyUI
+fi
+if [[ ! -d ComfyUI/custom_nodes/ComfyUI-GGUF/.git ]]; then
+  git clone https://github.com/city96/ComfyUI-GGUF.git \
+    ComfyUI/custom_nodes/ComfyUI-GGUF
+fi
+
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python \
+  -e './LTX-Video[inference]' diffusers pillow accelerate protobuf piper-tts \
+  ftfy gdown librosa opencv-python scipy tqdm
+uv venv --python 3.12 ComfyUI/.venv
+uv pip install --python ComfyUI/.venv/bin/python -r ComfyUI/requirements.txt
+uv pip install --python ComfyUI/.venv/bin/python \
+  -r ComfyUI/custom_nodes/ComfyUI-GGUF/requirements.txt
+
+(cd ACE-Step-1.5 && uv sync)
+(cd ACE-Step-1.5 && uv run acestep-download --dir checkpoints)
+
+mkdir -p models/ltx models/huggingface outputs work
+.venv/bin/hf download Lightricks/LTX-Video \
+  ltxv-2b-0.9.8-distilled.safetensors \
+  ltxv-spatial-upscaler-0.9.8.safetensors \
+  --local-dir models/ltx
+.venv/bin/hf download rhasspy/piper-voices \
+  en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx \
+  en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json \
+  --local-dir models/piper
+.venv/bin/hf download QuantStack/Wan2.2-I2V-A14B-GGUF \
+  HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf \
+  LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf \
+  --local-dir ComfyUI/models/diffusion_models
+.venv/bin/hf download Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
+  split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors \
+  split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors \
+  --local-dir ComfyUI/models/loras
+.venv/bin/hf download Comfy-Org/Wan_2.2_ComfyUI_Repackaged \
+  split_files/vae/wan_2.1_vae.safetensors \
+  --local-dir ComfyUI/models/vae
+.venv/bin/hf download Comfy-Org/Wan_2.1_ComfyUI_repackaged \
+  split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors \
+  --local-dir ComfyUI/models/text_encoders
+
+mkdir -p Wav2Lip/checkpoints Wav2Lip/face_detection/detection/sfd
+if [[ ! -f Wav2Lip/checkpoints/wav2lip_gan.pth ]]; then
+  .venv/bin/gdown 15G3U08c8xsCkOqQxE38Z2XXDnPcOptNk \
+    -O Wav2Lip/checkpoints/wav2lip_gan.pth
+fi
+if [[ ! -f Wav2Lip/face_detection/detection/sfd/s3fd.pth ]]; then
+  curl -L --fail \
+    https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth \
+    -o Wav2Lip/face_detection/detection/sfd/s3fd.pth
+fi
+git -C Wav2Lip apply --check ../patches/wav2lip-modern.patch 2>/dev/null && \
+  git -C Wav2Lip apply ../patches/wav2lip-modern.patch || true
+
+cat <<'EOF'
+
+Local Story Forge environment is ready.
+
+Before the first FLUX render:
+  1. Accept https://huggingface.co/black-forest-labs/FLUX.1-schnell
+  2. Run: .venv/bin/hf auth login
+
+Then test with:
+  .venv/bin/python bin/sf render story_forge/examples/test_tiny.sf
+EOF

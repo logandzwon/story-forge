@@ -3,5 +3,16 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+.cache/
 *.tmp
+*.storyplan.json
 node_modules/
+models/
+outputs/
+work/
+LTX-Video/
+ACE-Step-1.5/
+Wan2.2/
+LivePortrait/
+Wav2Lip/
+ComfyUI/

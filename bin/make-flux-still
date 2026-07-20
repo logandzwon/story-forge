@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Generate a still with FLUX.1-schnell on Apple Silicon."""
+
+import argparse
+import os
+from pathlib import Path
+
+import torch
+from diffusers import FluxPipeline
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("prompt")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--w", type=int, default=768)
+    parser.add_argument("--h", type=int, default=512)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--steps", type=int, default=4)
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parent.parent
+    model_id = os.environ.get(
+        "STORY_FORGE_FLUX_MODEL", "black-forest-labs/FLUX.1-schnell"
+    )
+    cache_dir = Path(os.environ.get(
+        "STORY_FORGE_HF_CACHE", str(root / "models" / "huggingface")
+    ))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    pipe = FluxPipeline.from_pretrained(
+        model_id, torch_dtype=torch.bfloat16, cache_dir=cache_dir
+    ).to("mps")
+    pipe.enable_attention_slicing()
+    generator = torch.Generator(device="cpu").manual_seed(args.seed)
+    image = pipe(
+        args.prompt,
+        width=args.w,
+        height=args.h,
+        num_inference_steps=args.steps,
+        guidance_scale=0.0,
+        generator=generator,
+    ).images[0]
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    image.save(out)
+    print(f"[flux] done -> {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

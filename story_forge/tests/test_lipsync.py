@@ -199,7 +199,7 @@ class TestRunLeanDispatch(unittest.TestCase):
         self.assertEqual(len(calls), 1, f"expected 1 lipsync call, got {calls}")
         self.assertEqual(calls[0]["backend"], "lp")
         self.assertEqual(calls[0]["driver_still"],
-                         str(sf_run.DEFAULT_DRIVER_STILL))
+                         str(self.work / "still_01.png"))
 
     def test_wav2lip_dispatches_wav2lip_backend(self):
         calls: list = []

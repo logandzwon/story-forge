@@ -1,0 +1,298 @@
+{
+  "schema_version": "0.1",
+  "film_meta": {
+    "title": "Mayce and the Little Star",
+    "slug": "mayce_and_the_little_star",
+    "target": "m5+mini",
+    "scene_duration": 8.5,
+    "extras": {}
+  },
+  "voice_presets": {
+    "warm": {
+      "value": "piper/en_US-libritts_r-medium",
+      "attrs": {
+        "speaker": 0,
+        "length": 1.18
+      }
+    },
+    "mayce": {
+      "value": "piper/en_US-amy-medium",
+      "attrs": {
+        "length": 1.22
+      }
+    }
+  },
+  "music_presets": {
+    "wonder": {
+      "value": "ace/gentle-celesta-and-strings",
+      "attrs": {
+        "vol": 0.34
+      }
+    }
+  },
+  "sfx_presets": {
+    "night_garden": {
+      "value": "ace/sfx",
+      "attrs": {
+        "prompt": "quiet summer garden at night, soft crickets and leaves rustling",
+        "duration": 10,
+        "vol": 0.2
+      }
+    },
+    "star_chime": {
+      "value": "ace/sfx",
+      "attrs": {
+        "prompt": "tiny magical crystal chime, warm and sparkling",
+        "duration": 4,
+        "vol": 0.25
+      }
+    }
+  },
+  "transitions": [
+    {
+      "name": "xfade",
+      "args": [],
+      "attrs": {
+        "dur": 0.5
+      }
+    }
+  ],
+  "mixes": [
+    {
+      "args": [
+        "duck",
+        "voice",
+        "->",
+        "music"
+      ],
+      "attrs": {
+        "threshold": -22,
+        "ratio": 4
+      }
+    }
+  ],
+  "vars": {
+    "style": "storybook watercolor animation, moonlit blue and warm gold palette, painterly, whimsical, soft cinematic light, 4k",
+    "mayce": "Mayce, a curious young girl with dark curly hair, yellow rain boots, blue overalls, and a moss-green satchel",
+    "star": "a tiny fallen star glowing like a golden firefly, with a soft sparkling trail",
+    "garden": "a lush moonlit garden filled with tall flowers, silver leaves, and winding stone paths"
+  },
+  "scenes": {
+    "garden_whisper": {
+      "still_spec": {
+        "engine": "flux",
+        "attrs": {},
+        "prompt": "storybook watercolor animation, moonlit blue and warm gold palette, painterly, whimsical, soft cinematic light, 4k, wide shot of Mayce, a curious young girl with dark curly hair, yellow rain boots, blue overalls, and a moss-green satchel walking through a lush moonlit garden filled with tall flowers, silver leaves, and winding stone paths, carrying a small lantern, fireflies drifting around her",
+        "seed": 1542087319
+      },
+      "motion_spec": {
+        "engine": "wan",
+        "attrs": {},
+        "prompt": "slow tracking shot beside Mayce, flowers sway gently, fireflies drift, lantern light bobs with her steps",
+        "duration": 5.0,
+        "seed": 298441067
+      },
+      "narration_spec": {
+        "engine": "warm",
+        "attrs": {},
+        "line": "Mayce had always believed the garden whispered after everyone else had gone to sleep.",
+        "lipsync": false,
+        "voice": "warm",
+        "seed": 624870115
+      },
+      "narration_specs": [
+        {
+          "engine": "warm",
+          "attrs": {},
+          "line": "Mayce had always believed the garden whispered after everyone else had gone to sleep.",
+          "lipsync": false,
+          "voice": "warm",
+          "seed": 624870115
+        }
+      ],
+      "music_spec": {
+        "preset": "wonder",
+        "value": "ace/gentle-celesta-and-strings",
+        "attrs": {
+          "vol": 0.3
+        }
+      },
+      "sfx_specs": [
+        {
+          "preset": "night_garden",
+          "value": "ace/sfx",
+          "attrs": {
+            "prompt": "quiet summer garden at night, soft crickets and leaves rustling",
+            "duration": 10,
+            "vol": 0.2,
+            "at": 0.0
+          }
+        }
+      ],
+      "attrs": {},
+      "extras": {}
+    },
+    "fallen_star": {
+      "still_spec": {
+        "engine": "flux",
+        "attrs": {},
+        "prompt": "storybook watercolor animation, moonlit blue and warm gold palette, painterly, whimsical, soft cinematic light, 4k, medium shot of Mayce, a curious young girl with dark curly hair, yellow rain boots, blue overalls, and a moss-green satchel kneeling beside a tiny fallen star glowing like a golden firefly, with a soft sparkling trail, nestled beneath a giant bluebell in the moonlit garden, wonder reflected in her eyes",
+        "seed": 2067349811
+      },
+      "motion_spec": {
+        "engine": "wan",
+        "attrs": {},
+        "prompt": "gentle push-in, the tiny star flickers softly, Mayce reaches out her cupped hands, bluebell petals tremble",
+        "duration": 5.0,
+        "seed": 1780435526
+      },
+      "narration_spec": {
+        "engine": "warm",
+        "attrs": {},
+        "line": "Beneath the bluebells, she found a little star that had fallen too far from home.",
+        "lipsync": false,
+        "voice": "warm",
+        "seed": 944126380
+      },
+      "narration_specs": [
+        {
+          "engine": "warm",
+          "attrs": {},
+          "line": "Beneath the bluebells, she found a little star that had fallen too far from home.",
+          "lipsync": false,
+          "voice": "warm",
+          "seed": 944126380
+        }
+      ],
+      "music_spec": {
+        "preset": "wonder",
+        "value": "ace/gentle-celesta-and-strings",
+        "attrs": {
+          "vol": 0.34
+        }
+      },
+      "sfx_specs": [
+        {
+          "preset": "star_chime",
+          "value": "ace/sfx",
+          "attrs": {
+            "prompt": "tiny magical crystal chime, warm and sparkling",
+            "duration": 4,
+            "vol": 0.25,
+            "at": 2.0
+          }
+        }
+      ],
+      "attrs": {},
+      "extras": {}
+    },
+    "hilltop_climb": {
+      "still_spec": {
+        "engine": "flux",
+        "attrs": {},
+        "prompt": "storybook watercolor animation, moonlit blue and warm gold palette, painterly, whimsical, soft cinematic light, 4k, sweeping wide shot of Mayce, a curious young girl with dark curly hair, yellow rain boots, blue overalls, and a moss-green satchel climbing a grassy hill above the garden, sheltering a tiny fallen star glowing like a golden firefly in both hands, tall grass bending in the wind, enormous starry sky overhead",
+        "seed": 310948267
+      },
+      "motion_spec": {
+        "engine": "wan",
+        "attrs": {},
+        "prompt": "low sweeping camera follows Mayce uphill, grass ripples in waves, clouds part slowly, the little star grows brighter",
+        "duration": 5.0,
+        "seed": 761390442
+      },
+      "narration_spec": {
+        "engine": "warm",
+        "attrs": {},
+        "line": "Up the moonlit hill she climbed, carrying a light no bigger than a wish.",
+        "lipsync": false,
+        "voice": "warm",
+        "seed": 1356278094
+      },
+      "narration_specs": [
+        {
+          "engine": "warm",
+          "attrs": {},
+          "line": "Up the moonlit hill she climbed, carrying a light no bigger than a wish.",
+          "lipsync": false,
+          "voice": "warm",
+          "seed": 1356278094
+        }
+      ],
+      "music_spec": {
+        "preset": "wonder",
+        "value": "ace/gentle-celesta-and-strings",
+        "attrs": {
+          "vol": 0.38
+        }
+      },
+      "sfx_specs": [
+        {
+          "preset": "night_garden",
+          "value": "ace/sfx",
+          "attrs": {
+            "prompt": "gentle wind across a grassy hill at night, distant crickets",
+            "duration": 10,
+            "vol": 0.22,
+            "at": 0.0
+          }
+        }
+      ],
+      "attrs": {},
+      "extras": {}
+    },
+    "home_in_the_sky": {
+      "still_spec": {
+        "engine": "flux",
+        "attrs": {},
+        "prompt": "storybook watercolor animation, moonlit blue and warm gold palette, painterly, whimsical, soft cinematic light, 4k, heroic medium-wide shot of Mayce, a curious young girl with dark curly hair, yellow rain boots, blue overalls, and a moss-green satchel standing at the hilltop with her hands raised, a tiny golden star lifting into the night sky on a sparkling trail, constellations glowing brighter above her, joyful tears in her eyes",
+        "seed": 881275604
+      },
+      "motion_spec": {
+        "engine": "wan",
+        "attrs": {},
+        "prompt": "camera circles slowly around Mayce, the little star spirals upward, golden sparks drift down, the constellations brighten one by one",
+        "duration": 5.0,
+        "seed": 2018364975
+      },
+      "narration_spec": {
+        "engine": "warm",
+        "attrs": {},
+        "line": "And from that night on, whenever Mayce felt small, one star shone brighter to remind her how much light she carried.",
+        "lipsync": false,
+        "voice": "warm",
+        "seed": 475190836
+      },
+      "narration_specs": [
+        {
+          "engine": "warm",
+          "attrs": {},
+          "line": "And from that night on, whenever Mayce felt small, one star shone brighter to remind her how much light she carried.",
+          "lipsync": false,
+          "voice": "warm",
+          "seed": 475190836
+        }
+      ],
+      "music_spec": {
+        "preset": "wonder",
+        "value": "ace/gentle-celesta-and-strings",
+        "attrs": {
+          "vol": 0.42
+        }
+      },
+      "sfx_specs": [
+        {
+          "preset": "star_chime",
+          "value": "ace/sfx",
+          "attrs": {
+            "prompt": "rising magical shimmer followed by one clear gentle bell",
+            "duration": 5,
+            "vol": 0.28,
+            "at": 1.0
+          }
+        }
+      ],
+      "attrs": {},
+      "extras": {}
+    }
+  }
+}

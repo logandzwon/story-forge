@@ -1,0 +1,50 @@
+diff --git a/audio.py b/audio.py
+index 32b20c4..32ab5fa 100644
+--- a/audio.py
++++ b/audio.py
+@@ -97,7 +97,7 @@ def _linear_to_mel(spectogram):
+ 
+ def _build_mel_basis():
+     assert hp.fmax <= hp.sample_rate // 2
+-    return librosa.filters.mel(hp.sample_rate, hp.n_fft, n_mels=hp.num_mels,
++    return librosa.filters.mel(sr=hp.sample_rate, n_fft=hp.n_fft, n_mels=hp.num_mels,
+                                fmin=hp.fmin, fmax=hp.fmax)
+ 
+ def _amp_to_db(x):
+diff --git a/inference.py b/inference.py
+index 9069252..8d72c51 100644
+--- a/inference.py
++++ b/inference.py
+@@ -162,12 +162,18 @@ def _load(checkpoint_path):
+ 		checkpoint = torch.load(checkpoint_path)
+ 	else:
+ 		checkpoint = torch.load(checkpoint_path,
+-							map_location=lambda storage, loc: storage)
++							map_location=lambda storage, loc: storage,
++							weights_only=False)
+ 	return checkpoint
+ 
+ def load_model(path):
+-	model = Wav2Lip()
+ 	print("Load checkpoint from: {}".format(path))
++	try:
++		model = torch.jit.load(path, map_location=device)
++		return model.to(device).eval()
++	except (RuntimeError, ValueError):
++		pass
++	model = Wav2Lip()
+ 	checkpoint = _load(path)
+ 	s = checkpoint["state_dict"]
+ 	new_s = {}
+@@ -273,8 +279,9 @@ def main():
+ 
+ 	out.release()
+ 
+-	command = 'ffmpeg -y -i {} -i {} -strict -2 -q:v 1 {}'.format(args.audio, 'temp/result.avi', args.outfile)
+-	subprocess.call(command, shell=platform.system() != 'Windows')
++	command = ['ffmpeg', '-y', '-i', args.audio, '-i', 'temp/result.avi',
++			   '-strict', '-2', '-q:v', '1', args.outfile]
++	subprocess.run(command, check=True)
+ 
+ if __name__ == '__main__':
+ 	main()

@@ -1,0 +1,15 @@
+film "The Storyteller" slug=integrated_demo target=m2 scene_dur=3
+
+voice warm: piper/en_US-libritts_r-medium speaker=0 length=1.08
+music gentle: ace/soft-cinematic-piano vol=0.22
+
+scene welcome:
+    still flux:
+        prompt: "cinematic close-up portrait of a friendly adult storyteller facing camera, warm studio lighting, unobstructed mouth, detailed"
+        seed: 77
+    motion ltx:
+        prompt: "subtle breathing, gentle blink, slight camera push, natural expression"
+        duration: 3
+    narrate warm with lipsync=wav2lip:
+        line: "Welcome. Your stories can now come alive."
+    music gentle vol=0.22

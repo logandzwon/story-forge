@@ -55,26 +55,34 @@ import time
 from pathlib import Path
 from typing import Any
 
-REPO = Path("/Users/dtribe/Desktop/PROJECTS/AI/videopipe")
+REPO = Path(__file__).resolve().parent.parent
 PIPELINE = REPO / "story_pipeline.py"
 RENDER_ROUTE = REPO / "bin" / "render-route"
 HOME = Path.home()
-FLUX = HOME / "Scripts" / "flux_t2i.py"
-WAN_OUT = HOME / "AI" / "videopipe" / "outputs"
-DEFAULT_OUT_DIR = HOME / "AI" / "videopipe" / "outputs"
-PIPER = HOME / "Library" / "Python" / "3.9" / "bin" / "piper"
-PIPER_MODEL = (HOME / "Desktop" / "PROJECTS" / "Song Forge"
-               / "piper_voices" / "en_US-libritts_r-medium.onnx")
+PYTHON = Path(os.environ.get("STORY_FORGE_PYTHON", REPO / ".venv" / "bin" / "python"))
+FLUX = Path(os.environ.get("STORY_FORGE_FLUX_BIN", REPO / "bin" / "make-flux-still"))
+WAN_OUT = Path(os.environ.get("STORY_FORGE_OUTPUT_DIR", REPO / "outputs"))
+DEFAULT_OUT_DIR = WAN_OUT
+PIPER = Path(os.environ.get("STORY_FORGE_PIPER_BIN", REPO / ".venv" / "bin" / "piper"))
+PIPER_MODEL = Path(os.environ.get(
+    "STORY_FORGE_PIPER_MODEL",
+    REPO / "models" / "piper" / "en" / "en_US" / "libritts_r" / "medium"
+    / "en_US-libritts_r-medium.onnx",
+))
+ACE_PYTHON = Path(os.environ.get(
+    "STORY_FORGE_ACE_PYTHON", REPO / "ACE-Step-1.5" / ".venv" / "bin" / "python"
+))
+ACE_MUSIC = Path(os.environ.get("STORY_FORGE_ACE_BIN", REPO / "bin" / "make-music"))
 
 # --- Avatar pipeline (LivePortrait + Wav2Lip) --------------------------------
 # Layout per ~/.myavatar-local/app.py: LP and W2L live under avatar-pipeline/.
-AVATAR_DIR = HOME / "Desktop" / "PROJECTS" / "avatar-pipeline"
-LP_DIR = AVATAR_DIR / "LivePortrait"
+AVATAR_DIR = REPO
+LP_DIR = REPO / "LivePortrait"
 LP_VENV_PYTHON = LP_DIR / ".venv" / "bin" / "python"
 LP_INFERENCE = LP_DIR / "inference.py"
-W2L_DIR = AVATAR_DIR / "Wav2Lip"
+W2L_DIR = REPO / "Wav2Lip"
 W2L_CKPT = W2L_DIR / "checkpoints" / "wav2lip_gan.pth"
-DEFAULT_DRIVER_STILL = HOME / "AI" / "videopipe" / "test_stills" / "walk_frame.png"
+DEFAULT_DRIVER_STILL = REPO / "models" / "lipsync-driver.png"
 
 # Lower-third overlay knobs (kept in module scope so tests can monkeypatch).
 LIPSYNC_OVERLAY_SCALE_W = "iw*0.30"   # ~30% of scene width
@@ -150,7 +158,7 @@ def _render_still(prompt: str, out_png: Path, seed: int,
         print(f"[still] cached: {out_png}")
         return
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    _sh([str(FLUX), prompt, "--out", str(out_png),
+    _sh([str(PYTHON), str(FLUX), prompt, "--out", str(out_png),
          "--w", str(width), "--h", str(height), "--seed", str(int(seed))])
 
 
@@ -227,6 +235,48 @@ def _render_narration(line: str, voice_spec: dict[str, Any],
     return out_wav.exists()
 
 
+def _render_music(prompt: str, duration: float, out_wav: Path,
+                  seed: int = 42) -> bool:
+    """Generate an instrumental score with ACE-Step. Idempotent."""
+    if out_wav.exists():
+        return True
+    if not ACE_PYTHON.exists() or not ACE_MUSIC.exists():
+        print("[music] ACE-Step environment missing; skipping", flush=True)
+        return False
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    _sh([str(ACE_PYTHON), str(ACE_MUSIC), prompt,
+         "--duration", str(max(10.0, duration)),
+         "--seed", str(seed), "--out", str(out_wav)])
+    return out_wav.exists()
+
+
+def _mix_voice_music(voice: Path | None, music: Path | None, out_wav: Path,
+                     duration: float, music_volume: float = 0.3) -> Path | None:
+    """Build the final audio bed with music below narration."""
+    if not voice and not music:
+        return None
+    if voice and music:
+        fc = (f"[1:a]volume={music_volume}[m];"
+              f"[0:a][m]amix=inputs=2:duration=longest:normalize=0,"
+              f"apad=whole_dur={duration}[a]")
+        _sh(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(voice), "-stream_loop", "-1", "-i", str(music),
+             "-filter_complex", fc, "-map", "[a]", "-t", str(duration),
+             "-c:a", "pcm_s16le", str(out_wav)])
+    elif music:
+        _sh(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-stream_loop", "-1", "-i", str(music),
+             "-af", f"volume={music_volume},apad=whole_dur={duration}",
+             "-t", str(duration), "-c:a", "pcm_s16le", str(out_wav)])
+    else:
+        # Unit-test render shims may record the ffmpeg call without creating
+        # its declared output. Preserve the pre-music behavior in that case.
+        if not voice.exists():
+            return voice
+        shutil.copy2(voice, out_wav)
+    return out_wav
+
+
 # ---------------------------------------------------------------------------
 # Lipsync (talking-head) overlay support
 # ---------------------------------------------------------------------------
@@ -253,13 +303,9 @@ def _lipsync_inputs_available(backend: str, driver_still: Path) -> bool:
         print(f"[lipsync] driver still missing: {driver_still} — skipping",
               flush=True)
         return False
-    if not LP_INFERENCE.exists() or not LP_VENV_PYTHON.exists():
-        print(f"[lipsync] LP inference or venv missing under {LP_DIR} — skipping",
-              flush=True)
+    if not W2L_CKPT.exists() or not (W2L_DIR / "inference.py").exists():
+        print(f"[lipsync] Wav2Lip installation missing under {W2L_DIR}", flush=True)
         return False
-    if backend == "wav2lip" and not W2L_CKPT.exists():
-        print(f"[lipsync] wav2lip checkpoint missing: {W2L_CKPT} — falling back to lp",
-              flush=True)
     return True
 
 
@@ -281,6 +327,12 @@ def _render_lipsync_clip(audio_wav: Path, backend: str,
     runs are slow (minutes per clip); the runner is expected to skip them
     in test mode by setting STORY_FORGE_SKIP_AVATAR=1.
     """
+    requested_out = out_mp4
+    audio_wav = audio_wav.resolve()
+    driver_still = driver_still.resolve()
+    out_mp4 = out_mp4.resolve()
+    work_dir = work_dir.resolve()
+
     if os.environ.get("STORY_FORGE_SKIP_AVATAR") == "1":
         print("[lipsync] STORY_FORGE_SKIP_AVATAR=1 — placeholder mp4 used",
               flush=True)
@@ -293,7 +345,7 @@ def _render_lipsync_clip(audio_wav: Path, backend: str,
                  "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                  "-r", "25", "-vf", "scale=512:512",
                  "-c:a", "aac", str(out_mp4)])
-            return out_mp4
+            return requested_out
         except Exception as exc:
             print(f"[lipsync] placeholder build failed: {exc}", flush=True)
             return None
@@ -316,51 +368,26 @@ def _render_lipsync_clip(audio_wav: Path, backend: str,
         print(f"[lipsync] driver clip build failed: {exc}", flush=True)
         return None
 
-    # 2. LivePortrait pass.
-    lp_out_dir = work_dir / "lp"
-    lp_out_dir.mkdir(exist_ok=True)
-    lp_cmd = [
-        str(LP_VENV_PYTHON), "inference.py",
-        "-s", str(driver_still),
-        "-d", str(driver_clip),
-        "-o", str(lp_out_dir),
-        "--flag_use_half_precision",
-        "--no-flag_do_torch_compile",
-    ]
+    # 2. Wav2Lip mouth pass. Bare `with lipsync` and explicit
+    # `lipsync=wav2lip` both use this local, audio-driven backend.
     env = {**os.environ, "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
-    try:
-        subprocess.run(lp_cmd, cwd=LP_DIR, env=env, check=True)
-    except subprocess.CalledProcessError as exc:
-        print(f"[lipsync] LP inference failed: {exc}", flush=True)
-        return None
-
-    lp_candidates = [p for p in lp_out_dir.glob("*.mp4") if "_concat" not in p.name]
-    if not lp_candidates:
-        print("[lipsync] LP produced no mp4 — aborting overlay", flush=True)
-        return None
-    lp_video = max(lp_candidates, key=lambda p: p.stat().st_size)
-
-    # 3. Optional Wav2Lip mouth pass.
-    if backend == "wav2lip" and W2L_CKPT.exists():
-        w2l_out = work_dir / "w2l.mp4"
-        w2l_cmd = [
-            str(LP_VENV_PYTHON), "inference.py",
+    w2l_out = work_dir / "w2l.mp4"
+    w2l_cmd = [
+            str(PYTHON), "inference.py",
             "--checkpoint_path", str(W2L_CKPT),
-            "--face", str(lp_video),
+            "--face", str(driver_clip),
             "--audio", str(audio_wav),
             "--outfile", str(w2l_out),
             "--resize_factor", "1",
             "--pads", "0", "5", "0", "0",
             "--nosmooth",
         ]
-        try:
-            subprocess.run(w2l_cmd, cwd=W2L_DIR, env=env, check=True)
-            final_src = w2l_out
-        except subprocess.CalledProcessError as exc:
-            print(f"[lipsync] Wav2Lip failed, using LP-only: {exc}", flush=True)
-            final_src = lp_video
-    else:
-        final_src = lp_video
+    try:
+        subprocess.run(w2l_cmd, cwd=W2L_DIR, env=env, check=True)
+        final_src = w2l_out
+    except subprocess.CalledProcessError as exc:
+        print(f"[lipsync] Wav2Lip failed: {exc}", flush=True)
+        return None
 
     # 4. Mux narration audio onto the head clip so the overlay carries voice
     #    when composited downstream (the scene base track stays muted).
@@ -374,7 +401,7 @@ def _render_lipsync_clip(audio_wav: Path, backend: str,
     except subprocess.CalledProcessError as exc:
         print(f"[lipsync] mux failed: {exc}", flush=True)
         return None
-    return out_mp4
+    return requested_out
 
 
 def _overlay_lipsync_on_scene(scene_clip: Path, head_clip: Path,
@@ -476,7 +503,7 @@ def render_lean(plan: dict[str, Any],
     else:
         scenes = scenes_all
 
-    work_dir = work_dir or (HOME / "Desktop" / "AI Videos" / slug)
+    work_dir = work_dir or (REPO / "work" / slug)
     work_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_path or (DEFAULT_OUT_DIR / f"{slug}.mp4")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -489,16 +516,21 @@ def render_lean(plan: dict[str, Any],
     t0 = time.time()
     enhanced_clips: list[Path] = []
     narration_pieces: list[tuple[int, Path]] = []  # (scene_index_1based, wav)
+    first_music_spec: dict[str, Any] | None = None
 
-    driver_still_env = os.environ.get("LIPSYNC_DRIVER_STILL")
-    driver_still = (Path(driver_still_env) if driver_still_env
-                    else DEFAULT_DRIVER_STILL)
+    driver_still_env = (os.environ.get("STORY_FORGE_LIPSYNC_DRIVER")
+                        or os.environ.get("LIPSYNC_DRIVER_STILL"))
+    # An explicit portrait remains supported, but otherwise use each scene's
+    # own still. A global generic face is visually wrong for character films.
+    driver_still = Path(driver_still_env) if driver_still_env else None
 
     for idx, (name, sc) in enumerate(scenes.items(), start=1):
         print(f"\n=== scene {idx}/{len(scenes)}: {name} ===", flush=True)
         still_spec = sc.get("still_spec") or {}
         motion_spec = sc.get("motion_spec") or {}
         narrate_spec = sc.get("narration_spec") or {}
+        if first_music_spec is None and sc.get("music_spec"):
+            first_music_spec = sc["music_spec"]
         # Prefer the plural list; fall back to singular for back-compat plans.
         narrate_specs = sc.get("narration_specs") or (
             [narrate_spec] if narrate_spec else [])
@@ -550,7 +582,7 @@ def render_lean(plan: dict[str, Any],
             print(f"[lipsync] scene={name} narrate#{n_i} backend={backend}",
                   flush=True)
             head_clip = _render_lipsync_clip(
-                piece, backend, driver_still, head_mp4, head_dir)
+                piece, backend, driver_still or still_png, head_mp4, head_dir)
             if head_clip and head_clip.exists():
                 overlaid = work_dir / f"clip_{idx:02d}_overlay.mp4"
                 try:
@@ -572,14 +604,15 @@ def render_lean(plan: dict[str, Any],
             scene_dur=float(next(iter(scenes.values()))
                             .get("motion_spec", {}).get("duration", scene_dur)))
 
+    xfade = 0.5
+    per_scene = float(next(iter(scenes.values()))
+                      .get("motion_spec", {}).get("duration", scene_dur))
+    total_audio_dur = (len(scenes) - 1) * (per_scene - xfade) + per_scene
+
     # 6. Build narration track (adelay+amix, scene-synced) if we have any
     vo_wav: Path | None = None
     if narration_pieces:
-        xfade = 0.5
-        per_scene = float(next(iter(scenes.values()))
-                          .get("motion_spec", {}).get("duration", scene_dur))
         scene_advance = per_scene - xfade
-        total_audio_dur = (len(scenes) - 1) * scene_advance + per_scene
         args = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"]
         fc_parts = []
         mix_labels = []
@@ -599,8 +632,26 @@ def render_lean(plan: dict[str, Any],
                  "-c:a", "pcm_s16le", str(vo_wav)]
         _sh(args)
 
-    # 7. Final mux
-    _mux_narration(visuals, vo_wav, out_path)
+    # 7. Generate a score bed from the first referenced music preset.
+    music_wav: Path | None = None
+    music_volume = 0.3
+    if first_music_spec:
+        attrs = first_music_spec.get("attrs", {})
+        music_volume = float(attrs.get("vol", 0.3))
+        value = str(first_music_spec.get("value", "cinematic instrumental"))
+        prompt = str(attrs.get("prompt") or value.split("/", 1)[-1]
+                     .replace("-", " "))
+        prompt = f"{prompt}, cinematic instrumental score, no vocals"
+        candidate = work_dir / "music.wav"
+        if _render_music(prompt, total_audio_dur, candidate):
+            music_wav = candidate
+
+    mixed_audio = _mix_voice_music(
+        vo_wav, music_wav, work_dir / "audio_mix.wav",
+        total_audio_dur, music_volume)
+
+    # 8. Final mux
+    _mux_narration(visuals, mixed_audio, out_path)
 
     elapsed = time.time() - t0
     return {
