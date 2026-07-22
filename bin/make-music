@@ -23,10 +23,12 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    root = ROOT
     ace_root = ACE_ROOT
     out = Path(args.out).resolve()
-    staging = root / "work" / "ace-step"
+    # Story Forge passes work/<slug>/music.wav, so keep ACE-Step's UUID-named
+    # intermediate beside that film's other work instead of in a shared
+    # work/ace-step directory.
+    staging = out.parent / "ace-step"
     staging.mkdir(parents=True, exist_ok=True)
 
     dit = AceStepHandler()
@@ -68,6 +70,18 @@ def main() -> int:
     src = Path(result.audios[0]["path"])
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, out)
+    # The UUID-named file is only an ACE-Step handoff. The requested output is
+    # the canonical cached score, so do not leave a duplicate behind.
+    try:
+        src.unlink()
+    except FileNotFoundError:
+        pass
+    try:
+        staging.rmdir()
+    except OSError:
+        # Preserve the directory if ACE-Step emitted additional diagnostics or
+        # another generation is using it concurrently.
+        pass
     print(f"[music] done -> {out}")
     return 0
 

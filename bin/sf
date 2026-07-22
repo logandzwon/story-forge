@@ -9,7 +9,7 @@ Subcommands:
 Defaults:
   --engine lean  → per-scene Flux+render-route+ffmpeg (fast, MVP-grade)
   --engine full  → delegate to story_pipeline.py (overlays, chapter grades)
-  --out (omit)   → ~/AI/videopipe/outputs/<slug>.mp4
+  --out (omit)   → <repo>/outputs/<slug>.mp4
 """
 
 from __future__ import annotations
@@ -63,7 +63,8 @@ def cmd_parse(args: argparse.Namespace) -> int:
 def cmd_render(args: argparse.Namespace) -> int:
     path = Path(args.file)
     _ast, _resolved, plan = _compile(path)
-    plan_path = path.with_suffix(".storyplan.json")
+    slug = plan["film_meta"].get("slug", path.stem)
+    plan_path = REPO / "work" / slug / "storyplan.json"
     write_storyplan(plan, plan_path)
     print(f"wrote {plan_path}", file=sys.stderr)
 
@@ -72,8 +73,8 @@ def cmd_render(args: argparse.Namespace) -> int:
         print(json.dumps(cfg, indent=2, default=str))
         return 0
 
-    # Default output path: ~/AI/videopipe/outputs/<slug>.mp4
-    slug = plan["film_meta"].get("slug", path.stem)
+    # Final deliverables go in outputs; plans and render intermediates stay in
+    # work/<slug>/.
     default_out = REPO / "outputs" / f"{slug}.mp4"
     out_path = Path(args.out) if args.out else default_out
 

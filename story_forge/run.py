@@ -63,7 +63,7 @@ PYTHON = Path(os.environ.get("STORY_FORGE_PYTHON", REPO / ".venv" / "bin" / "pyt
 FLUX = Path(os.environ.get("STORY_FORGE_FLUX_BIN", REPO / "bin" / "make-flux-still"))
 WAN_OUT = Path(os.environ.get("STORY_FORGE_OUTPUT_DIR", REPO / "outputs"))
 DEFAULT_OUT_DIR = WAN_OUT
-PIPER = Path(os.environ.get("STORY_FORGE_PIPER_BIN", REPO / ".venv" / "bin" / "piper"))
+PIPER_BIN = os.environ.get("STORY_FORGE_PIPER_BIN")
 PIPER_MODEL = Path(os.environ.get(
     "STORY_FORGE_PIPER_MODEL",
     REPO / "models" / "piper" / "en" / "en_US" / "libritts_r" / "medium"
@@ -217,7 +217,11 @@ def _render_narration(line: str, voice_spec: dict[str, Any],
         return True
     if not line or not line.strip():
         return False
-    if not PIPER.exists() or not PIPER_MODEL.exists():
+    piper_cmd = ([PIPER_BIN] if PIPER_BIN else
+                 [str(PYTHON), "-m", "piper"])
+    piper_available = (Path(PIPER_BIN).exists() if PIPER_BIN else
+                       PYTHON.exists())
+    if not piper_available or not PIPER_MODEL.exists():
         print(f"[narrate] piper or model missing; skipping line", flush=True)
         return False
     attrs = (voice_spec or {}).get("attrs", {}) if voice_spec else {}
@@ -225,7 +229,7 @@ def _render_narration(line: str, voice_spec: dict[str, Any],
     speaker = str(attrs.get("speaker", 0))
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        [str(PIPER), "-m", str(PIPER_MODEL), "-f", str(out_wav),
+        [*piper_cmd, "-m", str(PIPER_MODEL), "-f", str(out_wav),
          "--speaker", speaker,
          "--length-scale", length_scale,
          "--noise-scale", "0.5",
