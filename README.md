@@ -21,9 +21,9 @@ This repository is a fork of
 [`nicedreamzapp/story-forge`](https://github.com/nicedreamzapp/story-forge),
 created by Matt Macosko / Nice Dreamz LLC. The upstream project supplies the
 Story Forge DSL, compiler, original rendering pipeline, UI, films, performance
-experiments, and manifesto. This fork retains the upstream MIT license and
-adds a reproducible environment for a 64 GB Apple Silicon Mac, together with
-the integrations listed below.
+experiments, and manifesto. This fork is by Logan Dzwonkowski / Cloud Coast Labs, LLC and
+retains the upstream MIT license and adds a reproducible environment for a
+64 GB Apple Silicon Mac, together with the integrations listed below.
 
 ---
 
